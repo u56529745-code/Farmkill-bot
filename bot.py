@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 
 # ============ НАСТРОЙКИ ============
-TOKEN = "8814067918:AAFap4BhU5KQ1HjsK0YpwmG9vSYaRTRtYaI"
+TOKEN = "8814067918:AAHVt-7m6mCafGS8sCAuOE8N2SqNma_cvZM"
 bot = telebot.TeleBot(TOKEN)
 
 # ============ КУРСЫ ============
