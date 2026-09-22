@@ -6,7 +6,7 @@ import os
 from flask import Flask
 
 # ============ НАСТРОЙКИ ============
-TOKEN = "8814067918:AAE_D2BAXH6UcIUhsXytIPOmoEkEH4srnq8"
+TOKEN = "8814067918:AAHuKBx72jA_2Zx1cnqIO_H1Bdw3L9rrVww"
 bot = telebot.TeleBot(TOKEN)
 
 # ============ ВЕБ-СЕРВЕР ============
