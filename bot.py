@@ -65,7 +65,6 @@ cart_msgs = {}
 cart_pages = {}
 cart_owners = {}
 add_counters = {}
-# owners[message_id] = user_id (кто создал меню/товар/корзину)
 owners = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
@@ -119,14 +118,12 @@ def block_stars(amount, added=0):
 
 # ============ ПРОВЕРКА ВЛАДЕЛЬЦА ============
 def check_owner(call):
-    """Проверяет, что нажал владелец меню. Возвращает True, если ок."""
     owner = owners.get(call.message.message_id)
     if owner is None:
-        # Если владелец не записан — считаем, что это владелец
         owners[call.message.message_id] = call.from_user.id
         return True
     if owner != call.from_user.id:
-        bot.answer_callback_query(call.id, "❌ Это не твоё меню")
+        bot.answer_callback_query(call.id, "Иди нахуй")
         return False
     return True
 
@@ -170,7 +167,6 @@ def main_menu_text():
 def start_cmd(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
-    # Удаляем старую корзину
     old_cart_msg = cart_msgs.get(user_id)
     if old_cart_msg:
         try:
@@ -183,7 +179,6 @@ def start_cmd(message):
     add_counters[user_id] = {}
     name = message.from_user.username
     cart_owners[user_id] = ("@" + name) if name else (message.from_user.first_name or "Гость")
-    # Удаляем старое меню
     old_menu = menu_msgs.get(user_id)
     if old_menu:
         try:
@@ -191,7 +186,6 @@ def start_cmd(message):
         except:
             pass
         owners.pop(old_menu, None)
-    # Отправляем меню (в ответ на сообщение игрока)
     msg = bot.send_message(
         chat_id,
         main_menu_text(),
