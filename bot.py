@@ -23,15 +23,10 @@ RUNES = {"save": 240, "prot": 240}
 CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
 
 # ============ ХРАНИЛИЩА ============
-# cart[user_id] = [{"key": "...", "name": "...", "price": ...}, ...]
 carts = {}
-# menu_msg[user_id] = message_id главного меню (для удаления через 5 мин)
 menu_msgs = {}
-# cart_msg[user_id] = message_id сообщения корзины (для редактирования)
 cart_msgs = {}
-# cart_page[user_id] = текущая страница корзины
 cart_pages = {}
-# cart_owner[user_id] = имя владельца
 cart_owners = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
@@ -42,26 +37,28 @@ def fmt(num):
         return f"{num / 1_000:.2f}к"
     return str(num)
 
+LINE = "━━━━━━━━━━━━━━━━━━"
+
 def block(title, silver):
     return (
-        f"╔══════════════════════╗\n"
-        f"║   {title}\n"
-        f"╠══════════════════════╣\n"
-        f"║   💰 {fmt(silver)} серебра\n"
-        f"╚══════════════════════╝"
+        f"{LINE}\n"
+        f"{title}\n"
+        f"{LINE}\n"
+        f"💰 {fmt(silver)} серебра\n"
+        f"{LINE}"
     )
 
 def block_best(title, silver):
     return (
-        f"╔══════════════════════╗\n"
-        f"║   {title}\n"
-        f"╠══════════════════════╣\n"
-        f"║   💰 {fmt(silver)} серебра\n"
-        f"╚══════════════════════╝\n"
-        f"      🟢 💸 ВЫГОДНО"
+        f"{LINE}\n"
+        f"{title}\n"
+        f"{LINE}\n"
+        f"💰 {fmt(silver)} серебра\n"
+        f"{LINE}\n"
+        f"🟢 💸 ВЫГОДНО"
     )
 
-# ============ АВТОУДАЛЕНИЕ ГЛАВНОГО МЕНЮ (5 мин) ============
+# ============ АВТОУДАЛЕНИЕ ГЛАВНОГО МЕНЮ ============
 def delete_main_menu_later(chat_id, user_id, delay=300):
     def worker():
         time.sleep(delay)
@@ -89,22 +86,21 @@ def main_menu():
 
 def main_menu_text():
     return (
-        "╔══════════════════════╗\n"
-        "║   🎮 FARMKILL\n"
-        "╚══════════════════════╝\n\n"
-        "👋 Привет! Я помогу с выбором и валютой.\n\n"
-        "Выбери ниже, что хочешь:\n\n"
-        "⚠️ В группах дай боту админку,\n"
-        "иначе он не сможет удалять свои сообщения.\n\n"
-        "👨‍💻 Разработчик — @yra228kil1"
+        f"{LINE}\n"
+        f"🎮 FARMKILL\n"
+        f"{LINE}\n\n"
+        f"👋 Привет! Я помогу с выбором и валютой.\n"
+        f"📌 Выбери ниже, что хочешь:\n\n"
+        f"{LINE}\n"
+        f"⚠️ В группах дай боту админку.\n"
+        f"{LINE}\n\n"
+        f"👨‍💻 Разработчик — @yra228kil1"
     )
 
 @bot.message_handler(commands=['start', 'help'])
 def start_cmd(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
-
-    # Удаляем старую корзину пользователя
     old_cart_msg = cart_msgs.get(user_id)
     if old_cart_msg:
         try:
@@ -114,27 +110,22 @@ def start_cmd(message):
     carts[user_id] = []
     cart_msgs[user_id] = None
     cart_pages[user_id] = 0
-
-    # Сохраняем имя
     name = message.from_user.username
     if name:
         cart_owners[user_id] = "@" + name
     else:
         cart_owners[user_id] = message.from_user.first_name or "Гость"
-
-    # Удаляем старое главное меню
     old_menu = menu_msgs.get(user_id)
     if old_menu:
         try:
             bot.delete_message(chat_id, old_menu)
         except:
             pass
-
     msg = bot.send_message(chat_id, main_menu_text(), reply_markup=main_menu())
     menu_msgs[user_id] = msg.message_id
     delete_main_menu_later(chat_id, user_id)
 
-# ============ ХЕЛПЕРЫ ДЛЯ ТОВАРОВ ============
+# ============ ХЕЛПЕР ДЛЯ ТОВАРОВ ============
 def item_kb(back_cb, want_key, want_name, want_price):
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -452,23 +443,20 @@ def token_cmd(message):
 def cart_text(user_id):
     name = cart_owners.get(user_id, "Гость")
     items = carts.get(user_id, [])
-    lines = [f"🛒 КОРЗИНА {name}", ""]
+    lines = [LINE, f"🛒 КОРЗИНА {name}", LINE, ""]
     if not items:
         lines.append("Корзина пуста")
         return "\n".join(lines)
-    total = 0
     page = cart_pages.get(user_id, 0)
     start = page * 4
     end = start + 4
     for i, item in enumerate(items[start:end], start=start + 1):
         lines.append(f"{i}. {item['name']} — {fmt(item['price'])}")
-        total += item["price"]
-    # Общая сумма всех товаров (не только страницы)
     full_total = sum(it["price"] for it in items)
     lines.append("")
-    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(LINE)
     lines.append(f"💰 Итого: {fmt(full_total)} серебра")
-    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(LINE)
     return "\n".join(lines)
 
 def cart_kb(user_id):
@@ -477,10 +465,8 @@ def cart_kb(user_id):
     page = cart_pages.get(user_id, 0)
     start = page * 4
     end = start + 4
-    # Кнопки-крестики для товаров на странице
     for i, item in enumerate(items[start:end], start=start):
         markup.add(types.InlineKeyboardButton(f"❌ {item['name']}", callback_data=f"rm|{i}"))
-    # Навигация страниц
     total_pages = max(1, (len(items) + 3) // 4)
     nav = []
     if page > 0:
@@ -490,7 +476,6 @@ def cart_kb(user_id):
         nav.append(types.InlineKeyboardButton("➡️", callback_data="cart_next"))
     if nav:
         markup.row(*nav)
-    # Очистить всё
     if items:
         markup.add(types.InlineKeyboardButton("🗑 Очистить всё", callback_data="cart_clear"))
     markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="cart_back"))
@@ -517,7 +502,6 @@ def want_callback(call):
     if user_id not in carts:
         carts[user_id] = []
     carts[user_id].append({"key": key, "name": name, "price": price})
-    # Если корзина уже была — редактируем
     mid = cart_msgs.get(user_id)
     if mid:
         try:
@@ -537,13 +521,11 @@ def remove_item(call):
     items = carts.get(user_id, [])
     if 0 <= idx < len(items):
         items.pop(idx)
-    # Сброс страницы, если вышли за границы
     page = cart_pages.get(user_id, 0)
     total_pages = max(1, (len(items) + 3) // 4)
     if page >= total_pages:
         page = total_pages - 1
         cart_pages[user_id] = page
-    # Удаляем сообщение корзины, если она опустела
     if not items:
         mid = cart_msgs.get(user_id)
         if mid:
@@ -594,7 +576,6 @@ def cart_noop(call):
 @bot.callback_query_handler(func=lambda call: call.data == "cart_back")
 def cart_back(call):
     user_id = call.from_user.id
-    # Удаляем корзину и показываем главное меню заново
     mid = cart_msgs.get(user_id)
     if mid:
         try:
