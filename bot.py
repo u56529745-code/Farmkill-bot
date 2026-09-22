@@ -1,729 +1,496 @@
-import telebot
+import telebot, threading, time, os
 from telebot import types
-import threading
-import time
-import os
 from flask import Flask
 
-# ============ НАСТРОЙКИ ============
 TOKEN = "8814067918:AAHuKBx72jA_2Zx1cnqIO_H1Bdw3L9rrVww"
 bot = telebot.TeleBot(TOKEN)
-
-# ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
 app = Flask(__name__)
 
 @app.route('/')
-def index():
-    return "Bot is running"
+def index(): return "ok"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+RUB, DIA = 57543.19, 16700
 
-# ============ КУРСЫ ============
-RUB_TO_SILVER = 57543.19
-DIAMOND_TO_SILVER = 16700
+STARS = {100:181.99,150:264.99,250:429.00,350:599.00,500:849.00,750:1259.00,1000:1679.00,1500:2499.00,2500:4199.00,5000:8299.00,10000:16599.00,25000:41499.00,50000:82999.00,100000:165999.00,150000:249999.00}
+VIP1 = {1:2400,3:6000,6:10800,12:18900}
+VIP2 = {1:1500,3:3900,6:6900,12:11700}
+PREM = {3:1049.00,6:1399.00,12:2539.00}
+DIAS = {100:100,300:300,500:500,1000:1000,2500:2500,5000:5000}
+RUNES = {"save":240,"prot":240}
+CONS = {"stone":160,"tag":100,"token":200}
 
-# ============ ЦЕНЫ ============
-STARS_PRICES = {
-    100: 181.99, 150: 264.99, 250: 429.00, 350: 599.00, 500: 849.00,
-    750: 1259.00, 1000: 1679.00, 1500: 2499.00, 2500: 4199.00,
-    5000: 8299.00, 10000: 16599.00, 25000: 41499.00,
-    50000: 82999.00, 100000: 165999.00, 150000: 249999.00,
-}
-VIP1 = {1: 2400, 3: 6000, 6: 10800, 12: 18900}
-VIP2 = {1: 1500, 3: 3900, 6: 6900, 12: 11700}
-PREMIUM = {3: 1049.00, 6: 1399.00, 12: 2539.00}
-DIAMONDS = {100: 100, 300: 300, 500: 500, 1000: 1000, 2500: 2500, 5000: 5000}
-RUNES = {"save": 240, "prot": 240}
-CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
-
-# ============ БАЗА ТОВАРОВ ============
 ITEMS = {}
+for m,d in VIP1.items(): ITEMS[f"vip1_{m}"] = {"name":f"👑 VIP 1 ({m} мес)","dia":d,"silver":d*DIA}
+for m,d in VIP2.items(): ITEMS[f"vip2_{m}"] = {"name":f"👑 VIP 2 ({m} мес)","dia":d,"silver":d*DIA}
+for a,r in STARS.items(): ITEMS[f"stars_{a}"] = {"name":f"⭐ {a} звёзд","silver":int(r*RUB)}
+for a in DIAS: ITEMS[f"dia_{a}"] = {"name":f"💎 {a} алмазов","silver":a*DIA}
+for m,r in PREM.items(): ITEMS[f"prem_{m}"] = {"name":f"💠 Premium ({m} мес)","silver":int(r*RUB)}
+for k,d in RUNES.items():
+    n = "🧿 Руна сохранения" if k=="save" else "🧿 Руна защиты"
+    ITEMS[f"rune_{k}"] = {"name":n,"dia":d,"silver":d*DIA}
+for k,d in CONS.items():
+    n = {"stone":"🧪 Камень очищения","tag":"🧪 Бирка","token":"🧪 Жетон смены имени"}[k]
+    ITEMS[f"cons_{k}"] = {"name":n,"dia":d,"silver":d*DIA}
 
-for m, dia in VIP1.items():
-    ITEMS[f"vip1_{m}"] = {"name": f"👑 VIP 1 ({m} мес)", "dia": dia, "silver": dia * DIAMOND_TO_SILVER}
-for m, dia in VIP2.items():
-    ITEMS[f"vip2_{m}"] = {"name": f"👑 VIP 2 ({m} мес)", "dia": dia, "silver": dia * DIAMOND_TO_SILVER}
-for amt, rub in STARS_PRICES.items():
-    ITEMS[f"stars_{amt}"] = {"name": f"⭐ {amt} звёзд", "silver": int(rub * RUB_TO_SILVER)}
-for amt in DIAMONDS:
-    ITEMS[f"dia_{amt}"] = {"name": f"💎 {amt} алмазов", "silver": amt * DIAMOND_TO_SILVER}
-for m, rub in PREMIUM.items():
-    ITEMS[f"prem_{m}"] = {"name": f"💠 Premium ({m} мес)", "silver": int(rub * RUB_TO_SILVER)}
-for k, dia in RUNES.items():
-    name = "🧿 Руна сохранения" if k == "save" else "🧿 Руна защиты"
-    ITEMS[f"rune_{k}"] = {"name": name, "dia": dia, "silver": dia * DIAMOND_TO_SILVER}
-for k, dia in CONSUMABLES.items():
-    names = {"stone": "🧪 Камень очищения", "tag": "🧪 Бирка", "token": "🧪 Жетон смены имени"}
-    ITEMS[f"cons_{k}"] = {"name": names[k], "dia": dia, "silver": dia * DIAMOND_TO_SILVER}
-
-# ============ ХРАНИЛИЩА ============
-carts = {}
-menu_msgs = {}
-cart_msgs = {}
-cart_pages = {}
-cart_owners = {}
-add_counters = {}
-owners = {}
+carts,menu_msgs,cart_msgs,cart_pages,cart_owners,add_cnt,owners = {},{},{},{},{},{},{}
 wrong_clicks = [0]
-
-# ============ ФОРМАТИРОВАНИЕ ============
-def fmt(num):
-    if num is None:
-        return "—"
-    if num >= 1_000_000_000:
-        return f"{num / 1_000_000_000:.3f} млрд"
-    elif num >= 1_000_000:
-        return f"{num / 1_000_000:.3f} млн"
-    elif num >= 1_000:
-        return f"{num / 1_000:.3f}к"
-    return str(num)
-
 LINE = "━━━━━━━━━━━━━━━━━━"
 
-def block(item, added=0):
-    lines = [LINE, item["name"], LINE]
-    dia = item.get("dia")
-    silver = item.get("silver")
-    if dia and silver:
-        lines.append(f"💎 {dia} алмазов")
-        lines.append("   или")
-        lines.append(f"💰 {fmt(silver)} серебра")
-    elif dia:
-        lines.append(f"💎 {dia} алмазов")
-    elif silver:
-        lines.append(f"💰 {fmt(silver)} серебра")
-    lines.append(LINE)
-    if added > 0:
-        lines.append(f"✅ Добавлено в корзину: {added}")
-    return "\n".join(lines)
+def fmt(n):
+    if n is None: return "—"
+    if n >= 1e9: return f"{n/1e9:.3f} млрд"
+    if n >= 1e6: return f"{n/1e6:.3f} млн"
+    if n >= 1e3: return f"{n/1e3:.3f}к"
+    return str(n)
 
-def stars_discount(amount):
-    base = STARS_PRICES[100] / 100
-    cur = STARS_PRICES[amount] / amount
-    if cur >= base:
-        return None
-    pct = (base - cur) / base * 100
-    return f"📊 Дешевле на {pct:.3f}% чем 100 звёзд"
+def block(it, added=0):
+    L = [LINE, it["name"], LINE]
+    d, s = it.get("dia"), it.get("silver")
+    if d and s: L += [f"💎 {d} алмазов","   или",f"💰 {fmt(s)} серебра"]
+    elif d: L.append(f"💎 {d} алмазов")
+    elif s: L.append(f"💰 {fmt(s)} серебра")
+    L.append(LINE)
+    if added > 0: L.append(f"✅ Добавлено в корзину: {added}")
+    return "\n".join(L)
 
-def block_stars(amount, added=0):
-    item = ITEMS[f"stars_{amount}"]
-    lines = [LINE, item["name"], LINE, f"💰 {fmt(item['silver'])} серебра", LINE]
-    disc = stars_discount(amount)
-    if disc:
-        lines.append(disc)
-    if added > 0:
-        lines.append(f"✅ Добавлено в корзину: {added}")
-    return "\n".join(lines)
+def star_disc(a):
+    b, c = STARS[100]/100, STARS[a]/a
+    if c >= b: return None
+    return f"📊 Дешевле на {(b-c)/b*100:.3f}% чем 100 звёзд"
 
-# ============ ПРОВЕРКА ВЛАДЕЛЬЦА ============
+def block_stars(a, added=0):
+    it = ITEMS[f"stars_{a}"]
+    L = [LINE, it["name"], LINE, f"💰 {fmt(it['silver'])} серебра", LINE]
+    d = star_disc(a)
+    if d: L.append(d)
+    if added > 0: L.append(f"✅ Добавлено в корзину: {added}")
+    return "\n".join(L)
+
 def check_owner(call):
-    owner = owners.get(call.message.message_id)
-    if owner is None:
+    o = owners.get(call.message.message_id)
+    if o is None:
         owners[call.message.message_id] = call.from_user.id
         return True
-    if owner != call.from_user.id:
+    if o != call.from_user.id:
         wrong_clicks[0] += 1
-        if (wrong_clicks[0] - 1) // 5 % 2 == 0:
-            bot.answer_callback_query(call.id, "Иди нахуй")
-        else:
-            bot.answer_callback_query(call.id, "Шут придёт, по попе атата")
+        txt = "Иди нахуй" if (wrong_clicks[0]-1)//5 % 2 == 0 else "Шут придёт, по попе атата"
+        bot.answer_callback_query(call.id, txt)
         return False
     return True
 
-# ============ АВТОУДАЛЕНИЕ ============
-def delete_main_menu_later(chat_id, user_id, delay=300):
-    def worker():
+def del_menu(chat_id, uid, delay=300):
+    def w():
         time.sleep(delay)
         try:
-            mid = menu_msgs.get(user_id)
+            mid = menu_msgs.get(uid)
             if mid:
                 bot.delete_message(chat_id, mid)
-                del menu_msgs[user_id]
+                menu_msgs.pop(uid, None)
                 owners.pop(mid, None)
-        except:
-            pass
-    threading.Thread(target=worker, daemon=True).start()
+        except: pass
+    threading.Thread(target=w, daemon=True).start()
 
-# ============ ГЛАВНОЕ МЕНЮ ============
 def main_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("👑 VIP", callback_data="menu_vip"),
-        types.InlineKeyboardButton("⭐ Звёзды", callback_data="menu_stars"),
-        types.InlineKeyboardButton("💎 Алмазы", callback_data="menu_diamonds"),
-        types.InlineKeyboardButton("⚜️ Руны", callback_data="menu_runes"),
-        types.InlineKeyboardButton("💠 Premium", callback_data="menu_premium"),
-        types.InlineKeyboardButton("📦 Расходники", callback_data="menu_consumables"),
-    )
-    return markup
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton("👑 VIP", callback_data="menu_vip"),
+          types.InlineKeyboardButton("⭐ Звёзды", callback_data="menu_stars"),
+          types.InlineKeyboardButton("💎 Алмазы", callback_data="menu_diamonds"),
+          types.InlineKeyboardButton("⚜️ Руны", callback_data="menu_runes"),
+          types.InlineKeyboardButton("💠 Premium", callback_data="menu_premium"),
+          types.InlineKeyboardButton("📦 Расходники", callback_data="menu_consumables"))
+    return m
 
-def main_menu_text():
-    return (
-        f"{LINE}\n🎮 FARMKILL\n{LINE}\n\n"
-        f"👋 Привет! Я помогу с выбором и валютой.\n"
-        f"📌 Выбери ниже, что хочешь:\n\n"
-        f"{LINE}\n⚠️ В группах дай боту админку.\n{LINE}\n\n"
-        f"👨‍💻 Разработчик — @yra228kil1"
-    )
+def menu_text():
+    return f"{LINE}\n🎮 FARMKILL\n{LINE}\n\n👋 Привет! Я помогу с выбором и валютой.\n📌 Выбери ниже, что хочешь:\n\n{LINE}\n⚠️ В группах дай боту админку.\n{LINE}\n\n👨‍💻 Разработчик — @yra228kil1"
 
-@bot.message_handler(commands=['start', 'help'])
-def start_cmd(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    old_cart_msg = cart_msgs.get(user_id)
-    if old_cart_msg:
-        try:
-            bot.delete_message(chat_id, old_cart_msg)
-        except:
-            pass
-    carts[user_id] = []
-    cart_msgs[user_id] = None
-    cart_pages[user_id] = 0
-    add_counters[user_id] = {}
-    name = message.from_user.username
-    cart_owners[user_id] = ("@" + name) if name else (message.from_user.first_name or "Гость")
-    old_menu = menu_msgs.get(user_id)
-    if old_menu:
-        try:
-            bot.delete_message(chat_id, old_menu)
-        except:
-            pass
-        owners.pop(old_menu, None)
-    msg = bot.send_message(
-        chat_id,
-        main_menu_text(),
-        reply_markup=main_menu(),
-        reply_to_message_id=message.message_id
-    )
-    menu_msgs[user_id] = msg.message_id
-    owners[msg.message_id] = user_id
-    delete_main_menu_later(chat_id, user_id)
+@bot.message_handler(commands=['start','help'])
+def start(message):
+    uid, cid = message.from_user.id, message.chat.id
+    old = cart_msgs.get(uid)
+    if old:
+        try: bot.delete_message(cid, old)
+        except: pass
+    carts[uid], cart_msgs[uid], cart_pages[uid], add_cnt[uid] = [], None, 0, {}
+    n = message.from_user.username
+    cart_owners[uid] = ("@"+n) if n else (message.from_user.first_name or "Гость")
+    om = menu_msgs.get(uid)
+    if om:
+        try: bot.delete_message(cid, om)
+        except: pass
+        owners.pop(om, None)
+    msg = bot.send_message(cid, menu_text(), reply_markup=main_menu(), reply_to_message_id=message.message_id)
+    menu_msgs[uid] = msg.message_id
+    owners[msg.message_id] = uid
+    del_menu(cid, uid)
 
-# ============ ХЕЛПЕР ============
-def item_kb(back_cb, key):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🔙 Назад", callback_data=back_cb),
-        types.InlineKeyboardButton("🛒 Хочу", callback_data=f"w|{key}"),
-    )
-    return markup
+def kb(back, key):
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data=back),
+          types.InlineKeyboardButton("🛒 Хочу", callback_data=f"w|{key}"))
+    return m
 
-def item_kb_from_key(key):
-    if key.startswith("vip1_") or key.startswith("vip2_"):
-        return item_kb("menu_vip", key)
-    elif key.startswith("stars_"):
-        return item_kb("menu_stars", key)
-    elif key.startswith("dia_"):
-        return item_kb("menu_diamonds", key)
-    elif key.startswith("rune_"):
-        return item_kb("menu_runes", key)
-    elif key.startswith("prem_"):
-        return item_kb("menu_premium", key)
-    elif key.startswith("cons_"):
-        return item_kb("menu_consumables", key)
-    return item_kb("back_main", key)
+def kb_from_key(key):
+    if key.startswith(("vip1_","vip2_")): return kb("menu_vip", key)
+    if key.startswith("stars_"): return kb("menu_stars", key)
+    if key.startswith("dia_"): return kb("menu_diamonds", key)
+    if key.startswith("rune_"): return kb("menu_runes", key)
+    if key.startswith("prem_"): return kb("menu_premium", key)
+    if key.startswith("cons_"): return kb("menu_consumables", key)
+    return kb("back_main", key)
 
-# ============ VIP ============
 def vip_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("VIP 1", callback_data="vip_type_1"),
-        types.InlineKeyboardButton("VIP 2", callback_data="vip_type_2"),
-    )
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton("VIP 1", callback_data="vip_type_1"),
+          types.InlineKeyboardButton("VIP 2", callback_data="vip_type_2"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-def vip_periods_menu(t):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    for m in (1, 3, 6, 12):
-        markup.add(types.InlineKeyboardButton(f"{m} мес", callback_data=f"vip{t}_{m}"))
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_vip"))
-    return markup
+def vip_per(t):
+    m = types.InlineKeyboardMarkup(row_width=2)
+    for p in (1,3,6,12): m.add(types.InlineKeyboardButton(f"{p} мес", callback_data=f"vip{t}_{p}"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_vip"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_vip")
-def menu_vip(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_vip")
+def cb_vip(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("👑 VIP\n\nВыбери тип:", call.message.chat.id, call.message.message_id, reply_markup=vip_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("👑 VIP\n\nВыбери тип:", c.message.chat.id, c.message.message_id, reply_markup=vip_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
-@bot.callback_query_handler(func=lambda call: call.data in ("vip_type_1", "vip_type_2"))
-def vip_type_cb(call):
-    if not check_owner(call):
-        return
-    t = call.data.split("_")[2]
+@bot.callback_query_handler(func=lambda c: c.data in ("vip_type_1","vip_type_2"))
+def cb_vip_type(c):
+    if not check_owner(c): return
+    t = c.data.split("_")[2]
     try:
-        bot.edit_message_text(f"👑 VIP {t}\n\nВыбери срок:", call.message.chat.id, call.message.message_id,
-                              reply_markup=vip_periods_menu(t))
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text(f"👑 VIP {t}\n\nВыбери срок:", c.message.chat.id, c.message.message_id, reply_markup=vip_per(t))
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
 @bot.message_handler(commands=['vip'])
-def vip_cmd(message):
-    bot.send_message(message.chat.id, "👑 VIP\n\nВыбери тип:", reply_markup=vip_menu())
+def cmd_vip(m): bot.send_message(m.chat.id, "👑 VIP\n\nВыбери тип:", reply_markup=vip_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("vip1_") or call.data.startswith("vip2_"))
-def vip_item_cb(call):
-    if not check_owner(call):
-        return
-    key = call.data
-    item = ITEMS[key]
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith(("vip1_","vip2_")))
+def cb_vip_item(c):
+    if not check_owner(c): return
+    it = ITEMS[c.data]
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block(item, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_vip", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block(it, add), c.message.chat.id, mid, reply_markup=kb("menu_vip", c.data))
+        owners[mid] = uid
+    except: pass
 
-# ============ STARS ============
 def stars_menu():
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    for amt in STARS_PRICES.keys():
-        markup.add(types.InlineKeyboardButton(f"{amt}", callback_data=f"stars_{amt}"))
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+    m = types.InlineKeyboardMarkup(row_width=3)
+    for a in STARS: m.add(types.InlineKeyboardButton(f"{a}", callback_data=f"stars_{a}"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_stars")
-def menu_stars(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_stars")
+def cb_stars(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("⭐ Звёзды\n\nВыбери количество:", call.message.chat.id, call.message.message_id, reply_markup=stars_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("⭐ Звёзды\n\nВыбери количество:", c.message.chat.id, c.message.message_id, reply_markup=stars_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
 @bot.message_handler(commands=['stars'])
-def stars_cmd(message):
-    bot.send_message(message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
+def cmd_stars(m): bot.send_message(m.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("stars_"))
-def stars_callback(call):
-    if not check_owner(call):
-        return
-    amount = int(call.data.split("_")[1])
-    key = f"stars_{amount}"
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("stars_"))
+def cb_star_item(c):
+    if not check_owner(c): return
+    a = int(c.data.split("_")[1])
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block_stars(amount, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_stars", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block_stars(a, add), c.message.chat.id, mid, reply_markup=kb("menu_stars", c.data))
+        owners[mid] = uid
+    except: pass
 
-# ============ DIAMONDS ============
-def diamonds_menu():
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    for amt in DIAMONDS.keys():
-        markup.add(types.InlineKeyboardButton(f"{amt}", callback_data=f"dia_{amt}"))
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+def dias_menu():
+    m = types.InlineKeyboardMarkup(row_width=3)
+    for a in DIAS: m.add(types.InlineKeyboardButton(f"{a}", callback_data=f"dia_{a}"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_diamonds")
-def menu_diamonds(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_diamonds")
+def cb_dias(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("💎 Алмазы\n\nВыбери количество:", call.message.chat.id, call.message.message_id, reply_markup=diamonds_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("💎 Алмазы\n\nВыбери количество:", c.message.chat.id, c.message.message_id, reply_markup=dias_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
 @bot.message_handler(commands=['diamonds'])
-def diamonds_cmd(message):
-    bot.send_message(message.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=diamonds_menu())
+def cmd_dias(m): bot.send_message(m.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=dias_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("dia_"))
-def diamonds_callback(call):
-    if not check_owner(call):
-        return
-    amount = call.data.split("_")[1]
-    key = f"dia_{amount}"
-    item = ITEMS[key]
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("dia_"))
+def cb_dia_item(c):
+    if not check_owner(c): return
+    it = ITEMS[c.data]
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block(item, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_diamonds", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block(it, add), c.message.chat.id, mid, reply_markup=kb("menu_diamonds", c.data))
+        owners[mid] = uid
+    except: pass
 
-# ============ RUNES ============
 def runes_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("Руна сохранения", callback_data="rune_save"),
-        types.InlineKeyboardButton("Руна защиты", callback_data="rune_prot"),
-    )
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton("Руна сохранения", callback_data="rune_save"),
+          types.InlineKeyboardButton("Руна защиты", callback_data="rune_prot"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_runes")
-def menu_runes(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_runes")
+def cb_runes(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("⚜️ Руны\n\nВыбери руну:", call.message.chat.id, call.message.message_id, reply_markup=runes_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("⚜️ Руны\n\nВыбери руну:", c.message.chat.id, c.message.message_id, reply_markup=runes_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
 @bot.message_handler(commands=['rune'])
-def rune_cmd(message):
-    bot.send_message(message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
+def cmd_rune(m): bot.send_message(m.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rune_"))
-def rune_callback(call):
-    if not check_owner(call):
-        return
-    key = call.data
-    item = ITEMS[key]
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("rune_"))
+def cb_rune_item(c):
+    if not check_owner(c): return
+    it = ITEMS[c.data]
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block(item, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_runes", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block(it, add), c.message.chat.id, mid, reply_markup=kb("menu_runes", c.data))
+        owners[mid] = uid
+    except: pass
 
-# ============ PREMIUM ============
-def premium_menu():
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("3 мес", callback_data="prem_3"),
-        types.InlineKeyboardButton("6 мес", callback_data="prem_6"),
-        types.InlineKeyboardButton("12 мес", callback_data="prem_12"),
-    )
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+def prem_menu():
+    m = types.InlineKeyboardMarkup(row_width=3)
+    m.add(types.InlineKeyboardButton("3 мес", callback_data="prem_3"),
+          types.InlineKeyboardButton("6 мес", callback_data="prem_6"),
+          types.InlineKeyboardButton("12 мес", callback_data="prem_12"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_premium")
-def menu_premium(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_premium")
+def cb_prem(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("💠 Telegram Premium\n\nВыбери срок:", call.message.chat.id, call.message.message_id, reply_markup=premium_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("💠 Telegram Premium\n\nВыбери срок:", c.message.chat.id, c.message.message_id, reply_markup=prem_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
 @bot.message_handler(commands=['premium'])
-def premium_cmd(message):
-    bot.send_message(message.chat.id, "💠 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
+def cmd_prem(m): bot.send_message(m.chat.id, "💠 Telegram Premium\n\nВыбери срок:", reply_markup=prem_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("prem_"))
-def premium_callback(call):
-    if not check_owner(call):
-        return
-    months = call.data.split("_")[1]
-    key = f"prem_{months}"
-    item = ITEMS[key]
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("prem_"))
+def cb_prem_item(c):
+    if not check_owner(c): return
+    it = ITEMS[c.data]
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block(item, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_premium", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block(it, add), c.message.chat.id, mid, reply_markup=kb("menu_premium", c.data))
+        owners[mid] = uid
+    except: pass
 
-# ============ CONSUMABLES ============
-def consumables_menu():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🧪 Бирка", callback_data="cons_tag"),
-        types.InlineKeyboardButton("🧪 Камень очищения", callback_data="cons_stone"),
-        types.InlineKeyboardButton("🧪 Жетон имени", callback_data="cons_token"),
-    )
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return markup
+def cons_menu():
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(types.InlineKeyboardButton("🧪 Бирка", callback_data="cons_tag"),
+          types.InlineKeyboardButton("🧪 Камень очищения", callback_data="cons_stone"),
+          types.InlineKeyboardButton("🧪 Жетон имени", callback_data="cons_token"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return m
 
-@bot.callback_query_handler(func=lambda call: call.data == "menu_consumables")
-def menu_consumables(call):
-    if not check_owner(call):
-        return
+@bot.callback_query_handler(func=lambda c: c.data == "menu_consumables")
+def cb_cons(c):
+    if not check_owner(c): return
     try:
-        bot.edit_message_text("📦 Расходники\n\nВыбери предмет:", call.message.chat.id, call.message.message_id, reply_markup=consumables_menu())
-        owners[call.message.message_id] = call.from_user.id
-    except:
-        pass
+        bot.edit_message_text("📦 Расходники\n\nВыбери предмет:", c.message.chat.id, c.message.message_id, reply_markup=cons_menu())
+        owners[c.message.message_id] = c.from_user.id
+    except: pass
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cons_"))
-def consumables_callback(call):
-    if not check_owner(call):
-        return
-    key = call.data
-    item = ITEMS[key]
-    user_id = call.from_user.id
-    mid = call.message.message_id
-    added = add_counters.get(user_id, {}).get(mid, 0)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("cons_"))
+def cb_cons_item(c):
+    if not check_owner(c): return
+    it = ITEMS[c.data]
+    uid, mid = c.from_user.id, c.message.message_id
+    add = add_cnt.get(uid,{}).get(mid,0)
     try:
-        bot.edit_message_text(block(item, added), call.message.chat.id, mid,
-                              reply_markup=item_kb("menu_consumables", key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(block(it, add), c.message.chat.id, mid, reply_markup=kb("menu_consumables", c.data))
+        owners[mid] = uid
+    except: pass
 
 @bot.message_handler(commands=['stone'])
-def stone_cmd(message):
-    item = ITEMS["cons_stone"]
-    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_stone"))
+def cmd_stone(m): bot.send_message(m.chat.id, block(ITEMS["cons_stone"]), reply_markup=kb("menu_consumables","cons_stone"))
 
 @bot.message_handler(commands=['tag'])
-def tag_cmd(message):
-    item = ITEMS["cons_tag"]
-    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_tag"))
+def cmd_tag(m): bot.send_message(m.chat.id, block(ITEMS["cons_tag"]), reply_markup=kb("menu_consumables","cons_tag"))
 
 @bot.message_handler(commands=['token'])
-def token_cmd(message):
-    item = ITEMS["cons_token"]
-    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_token"))
+def cmd_token(m): bot.send_message(m.chat.id, block(ITEMS["cons_token"]), reply_markup=kb("menu_consumables","cons_token"))
 
-# ============ КОРЗИНА ============
-def item_price_text(item):
-    dia = item.get("dia")
-    silver = item.get("silver")
-    if dia and silver:
-        return f"💎 {dia} или 💰 {fmt(silver)}"
-    elif dia:
-        return f"💎 {dia} алмазов"
-    elif silver:
-        return f"💰 {fmt(silver)}"
+def price_txt(it):
+    d, s = it.get("dia"), it.get("silver")
+    if d and s: return f"💎 {d} или 💰 {fmt(s)}"
+    if d: return f"💎 {d} алмазов"
+    if s: return f"💰 {fmt(s)}"
     return "—"
 
-def cart_text(user_id):
-    name = cart_owners.get(user_id, "Гость")
-    items = carts.get(user_id, [])
-    lines = [LINE, f"🛒 КОРЗИНА {name}", LINE, ""]
+def cart_text(uid):
+    n = cart_owners.get(uid, "Гость")
+    items = carts.get(uid, [])
+    L = [LINE, f"🛒 КОРЗИНА {n}", LINE, ""]
     if not items:
-        lines.append("Корзина пуста")
-        return "\n".join(lines)
-    page = cart_pages.get(user_id, 0)
-    start = page * 4
-    end = start + 4
-    for i, item in enumerate(items[start:end], start=start + 1):
-        lines.append(f"{i}. {item['name']} — {item_price_text(item)}")
-    total_dia = sum(it.get("dia", 0) for it in items if it.get("dia"))
-    total_silver = sum(it.get("silver", 0) for it in items if it.get("silver"))
-    lines.append("")
-    lines.append(LINE)
-    if total_dia > 0 and total_silver > 0:
-        lines.append(f"💰 Итого: 💎 {total_dia} или {fmt(total_silver)} серебра")
-    elif total_dia > 0:
-        lines.append(f"💎 Итого: {total_dia} алмазов")
-    elif total_silver > 0:
-        lines.append(f"💰 Итого: {fmt(total_silver)} серебра")
-    else:
-        lines.append("Итого: 0")
-    lines.append(LINE)
-    return "\n".join(lines)
+        L.append("Корзина пуста")
+        return "\n".join(L)
+    p = cart_pages.get(uid, 0)
+    for i, it in enumerate(items[p*4:p*4+4], start=p*4+1):
+        L.append(f"{i}. {it['name']} — {price_txt(it)}")
+    td = sum(x.get("dia",0) for x in items if x.get("dia"))
+    ts = sum(x.get("silver",0) for x in items if x.get("silver"))
+    L += ["", LINE]
+    if td>0 and ts>0: L.append(f"💰 Итого: 💎 {td} или {fmt(ts)} серебра")
+    elif td>0: L.append(f"💎 Итого: {td} алмазов")
+    elif ts>0: L.append(f"💰 Итого: {fmt(ts)} серебра")
+    else: L.append("Итого: 0")
+    L.append(LINE)
+    return "\n".join(L)
 
-def cart_kb(user_id):
-    items = carts.get(user_id, [])
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    page = cart_pages.get(user_id, 0)
-    start = page * 4
-    end = start + 4
-    for i, item in enumerate(items[start:end], start=start):
-        markup.add(types.InlineKeyboardButton(f"❌ {item['name']}", callback_data=f"rm|{i}"))
-    total_pages = max(1, (len(items) + 3) // 4)
+def cart_kb(uid):
+    items = carts.get(uid, [])
+    m = types.InlineKeyboardMarkup(row_width=2)
+    p = cart_pages.get(uid, 0)
+    for i, it in enumerate(items[p*4:p*4+4], start=p*4):
+        m.add(types.InlineKeyboardButton(f"❌ {it['name']}", callback_data=f"rm|{i}"))
+    tp = max(1, (len(items)+3)//4)
     nav = []
-    if page > 0:
-        nav.append(types.InlineKeyboardButton("⬅️", callback_data="cart_prev"))
-    nav.append(types.InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="cart_noop"))
-    if end < len(items):
-        nav.append(types.InlineKeyboardButton("➡️", callback_data="cart_next"))
-    if nav:
-        markup.row(*nav)
-    if items:
-        markup.add(types.InlineKeyboardButton("🗑 Очистить всё", callback_data="cart_clear"))
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="cart_back"))
-    return markup
+    if p > 0: nav.append(types.InlineKeyboardButton("⬅️", callback_data="cart_prev"))
+    nav.append(types.InlineKeyboardButton(f"{p+1}/{tp}", callback_data="cart_noop"))
+    if p*4+4 < len(items): nav.append(types.InlineKeyboardButton("➡️", callback_data="cart_next"))
+    if nav: m.row(*nav)
+    if items: m.add(types.InlineKeyboardButton("🗑 Очистить всё", callback_data="cart_clear"))
+    m.add(types.InlineKeyboardButton("🔙 Назад", callback_data="cart_back"))
+    return m
 
-def render_cart(user_id, chat_id, message_id=None):
-    text = cart_text(user_id)
-    kb = cart_kb(user_id)
-    if message_id:
+def render_cart(uid, cid, mid=None):
+    t = cart_text(uid); k = cart_kb(uid)
+    if mid:
         try:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
-            owners[message_id] = user_id
+            bot.edit_message_text(t, cid, mid, reply_markup=k)
+            owners[mid] = uid
             return
-        except:
-            pass
-    msg = bot.send_message(chat_id, text, reply_markup=kb)
-    cart_msgs[user_id] = msg.message_id
-    owners[msg.message_id] = user_id
+        except: pass
+    msg = bot.send_message(cid, t, reply_markup=k)
+    cart_msgs[uid] = msg.message_id
+    owners[msg.message_id] = uid
 
-# ============ ХОЧУ ============
-@bot.callback_query_handler(func=lambda call: call.data.startswith("w|"))
-def want_callback(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    key = call.data.split("|", 1)[1]
+@bot.callback_query_handler(func=lambda c: c.data.startswith("w|"))
+def cb_want(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    key = c.data.split("|",1)[1]
     if key not in ITEMS:
-        bot.answer_callback_query(call.id, "❌ Товар не найден")
-        return
-    item = ITEMS[key]
-    if user_id not in carts:
-        carts[user_id] = []
-    entry = {"key": key, "name": item["name"]}
-    if item.get("dia"):
-        entry["dia"] = item["dia"]
-    if item.get("silver"):
-        entry["silver"] = item["silver"]
-    carts[user_id].append(entry)
-
-    mid = call.message.message_id
-    if user_id not in add_counters:
-        add_counters[user_id] = {}
-    add_counters[user_id][mid] = add_counters[user_id].get(mid, 0) + 1
-    added = add_counters[user_id][mid]
-
-    if key.startswith("stars_"):
-        amount = int(key.split("_")[1])
-        text = block_stars(amount, added)
-    else:
-        text = block(item, added)
+        bot.answer_callback_query(c.id, "❌ Товар не найден"); return
+    it = ITEMS[key]
+    carts.setdefault(uid, []).append({**{"key":key,"name":it["name"]}, **({"dia":it["dia"]} if it.get("dia") else {}), **({"silver":it["silver"]} if it.get("silver") else {})})
+    mid = c.message.message_id
+    add_cnt.setdefault(uid, {})[mid] = add_cnt[uid].get(mid,0) + 1
+    add = add_cnt[uid][mid]
+    txt = block_stars(int(key.split("_")[1]), add) if key.startswith("stars_") else block(it, add)
     try:
-        bot.edit_message_text(text, call.message.chat.id, mid,
-                              reply_markup=item_kb_from_key(key))
-        owners[mid] = user_id
-    except:
-        pass
+        bot.edit_message_text(txt, c.message.chat.id, mid, reply_markup=kb_from_key(key))
+        owners[mid] = uid
+    except: pass
+    cmid = cart_msgs.get(uid)
+    try: render_cart(uid, c.message.chat.id, cmid)
+    except: render_cart(uid, c.message.chat.id)
+    bot.answer_callback_query(c.id, "✅ Добавлено в корзину")
 
-    cart_mid = cart_msgs.get(user_id)
-    if cart_mid:
-        try:
-            render_cart(user_id, call.message.chat.id, cart_mid)
-        except:
-            render_cart(user_id, call.message.chat.id)
-    else:
-        render_cart(user_id, call.message.chat.id)
-    bot.answer_callback_query(call.id, "✅ Добавлено в корзину")
-
-# ============ УДАЛЕНИЕ ============
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rm|"))
-def remove_item(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    idx = int(call.data.split("|")[1])
-    items = carts.get(user_id, [])
-    if 0 <= idx < len(items):
-        items.pop(idx)
-    page = cart_pages.get(user_id, 0)
-    total_pages = max(1, (len(items) + 3) // 4)
-    if page >= total_pages:
-        page = total_pages - 1
-        cart_pages[user_id] = page
+@bot.callback_query_handler(func=lambda c: c.data.startswith("rm|"))
+def cb_rm(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    i = int(c.data.split("|")[1])
+    items = carts.get(uid, [])
+    if 0 <= i < len(items): items.pop(i)
+    p = cart_pages.get(uid, 0)
+    tp = max(1, (len(items)+3)//4)
+    if p >= tp:
+        p = tp-1; cart_pages[uid] = p
     if not items:
-        mid = cart_msgs.get(user_id)
+        mid = cart_msgs.get(uid)
         if mid:
-            try:
-                bot.delete_message(call.message.chat.id, mid)
-            except:
-                pass
-        cart_msgs[user_id] = None
-        bot.answer_callback_query(call.id, "🗑 Корзина очищена")
+            try: bot.delete_message(c.message.chat.id, mid)
+            except: pass
+        cart_msgs[uid] = None
+        bot.answer_callback_query(c.id, "🗑 Корзина очищена")
         return
-    render_cart(user_id, call.message.chat.id, call.message.message_id)
-    bot.answer_callback_query(call.id, "❌ Удалено")
+    render_cart(uid, c.message.chat.id, c.message.message_id)
+    bot.answer_callback_query(c.id, "❌ Удалено")
 
-# ============ ОЧИСТИТЬ ВСЁ ============
-@bot.callback_query_handler(func=lambda call: call.data == "cart_clear")
-def cart_clear(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    carts[user_id] = []
-    mid = cart_msgs.get(user_id)
+@bot.callback_query_handler(func=lambda c: c.data == "cart_clear")
+def cb_clear(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    carts[uid] = []
+    mid = cart_msgs.get(uid)
     if mid:
-        try:
-            bot.delete_message(call.message.chat.id, mid)
-        except:
-            pass
-    cart_msgs[user_id] = None
-    bot.answer_callback_query(call.id, "🗑 Корзина очищена")
+        try: bot.delete_message(c.message.chat.id, mid)
+        except: pass
+    cart_msgs[uid] = None
+    bot.answer_callback_query(c.id, "🗑 Корзина очищена")
 
-# ============ НАВИГАЦИЯ ============
-@bot.callback_query_handler(func=lambda call: call.data == "cart_prev")
-def cart_prev(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    cart_pages[user_id] = max(0, cart_pages.get(user_id, 0) - 1)
-    render_cart(user_id, call.message.chat.id, call.message.message_id)
+@bot.callback_query_handler(func=lambda c: c.data == "cart_prev")
+def cb_prev(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    cart_pages[uid] = max(0, cart_pages.get(uid,0)-1)
+    render_cart(uid, c.message.chat.id, c.message.message_id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "cart_next")
-def cart_next(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    items = carts.get(user_id, [])
-    total_pages = max(1, (len(items) + 3) // 4)
-    cart_pages[user_id] = min(total_pages - 1, cart_pages.get(user_id, 0) + 1)
-    render_cart(user_id, call.message.chat.id, call.message.message_id)
+@bot.callback_query_handler(func=lambda c: c.data == "cart_next")
+def cb_next(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    items = carts.get(uid, [])
+    tp = max(1, (len(items)+3)//4)
+    cart_pages[uid] = min(tp-1, cart_pages.get(uid,0)+1)
+    render_cart(uid, c.message.chat.id, c.message.message_id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "cart_noop")
-def cart_noop(call):
-    bot.answer_callback_query(call.id)
+@bot.callback_query_handler(func=lambda c: c.data == "cart_noop")
+def cb_noop(c): bot.answer_callback_query(c.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "cart_back")
-def cart_back(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
-    mid = cart_msgs.get(user_id)
+@bot.callback_query_handler(func=lambda c: c.data == "cart_back")
+def cb_back_cart(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
+    mid = cart_msgs.get(uid)
     if mid:
-        try:
-            bot.delete_message(call.message.chat.id, mid)
-        except:
-            pass
-    cart_msgs[user_id] = None
-    msg = bot.send_message(call.message.chat.id, main_menu_text(), reply_markup=main_menu())
-    menu_msgs[user_id] = msg.message_id
-    owners[msg.message_id] = user_id
-    delete_main_menu_later(call.message.chat.id, user_id)
+        try: bot.delete_message(c.message.chat.id, mid)
+        except: pass
+    cart_msgs[uid] = None
+    msg = bot.send_message(c.message.chat.id, menu_text(), reply_markup=main_menu())
+    menu_msgs[uid] = msg.message_id
+    owners[msg.message_id] = uid
+    del_menu(c.message.chat.id, uid)
 
-# ============ НАЗАД В ГЛАВНОЕ ============
-@bot.callback_query_handler(func=lambda call: call.data == "back_main")
-def back_main(call):
-    if not check_owner(call):
-        return
-    user_id = call.from_user.id
+@bot.callback_query_handler(func=lambda c: c.data == "back_main")
+def cb_back(c):
+    if not check_owner(c): return
+    uid = c.from_user.id
     try:
-        bot.edit_message_text(main_menu_text(), call.message.chat.id, call.message.message_id, reply_markup=main_menu())
-        owners[call.message.message_id] = user_id
-    except:
-        pass
+        bot.edit_message_text(menu_text(), c.message.chat.id, c.message.message_id, reply_markup=main_menu())
+        owners[c.message.message_id] = uid
+    except: pass
 
-# ============ НЕИЗВЕСТНАЯ КОМАНДА ============
-@bot.message_handler(func=lambda message: True)
-def unknown(message):
-    bot.send_message(
-        message.chat.id,
-        "❌ Команда не распознана.\nНапишите ещё раз и проверьте написание\nили дождитесь @yra228kil1"
-    )
+@bot.message_handler(func=lambda m: True)
+def unknown(m):
+    bot.send_message(m.chat.id, "❌ Команда не распознана.\nНапишите ещё раз и проверьте написание\nили дождитесь @yra228kil1")
 
-# ============ ЗАПУСК ============
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000))), daemon=True).start()
     print("Бот запущен...")
     bot.infinity_polling()
