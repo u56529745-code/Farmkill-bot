@@ -21,39 +21,82 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 # ============ КУРСЫ ============
-RUB_TO_SILVER = 16700
+RUB_TO_SILVER = 57543.19
 DIAMOND_TO_SILVER = 16700
 
-# ============ ЦЕНЫ ============
-STARS = {100: 181.99, 250: 429.00, 500: 849.00, 1000: 1679.00, 2500: 4199.00, 10000: 16599.00}
-DIAMONDS = {100: 100, 300: 300, 500: 500, 1000: 1000, 2500: 2500, 5000: 5000}
-VIP = {1: 2400, 2: 1500}
+# ============ ЗВЁЗДЫ ============
+STARS_PRICES = {
+    100: 181.99, 150: 264.99, 250: 429.00, 350: 599.00, 500: 849.00,
+    750: 1259.00, 1000: 1679.00, 1500: 2499.00, 2500: 4199.00,
+    5000: 8299.00, 10000: 16599.00, 25000: 41499.00,
+    50000: 82999.00, 100000: 165999.00, 150000: 249999.00,
+}
+
+# ============ VIP (за алмазы, все сроки) ============
+VIP1 = {1: 2400, 3: 6000, 6: 10800, 12: 18900}
+VIP2 = {1: 1500, 3: 3900, 6: 6900, 12: 11700}
+
+# ============ PREMIUM (за рубли) ============
 PREMIUM = {3: 1049.00, 6: 1399.00, 12: 2539.00}
+
+# ============ АЛМАЗЫ ============
+DIAMONDS = {100: 100, 300: 300, 500: 500, 1000: 1000, 2500: 2500, 5000: 5000}
+
+# ============ РУНЫ, РАСХОДНИКИ ============
 RUNES = {"save": 240, "prot": 240}
 CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
 
 # ============ БАЗА ТОВАРОВ ============
 ITEMS = {}
 
-for lvl, dia in VIP.items():
-    ITEMS[f"vip_{lvl}"] = (f"👑 VIP {lvl} (1 месяц)", dia * DIAMOND_TO_SILVER)
-
-for amt, rub in STARS.items():
-    ITEMS[f"stars_{amt}"] = (f"⭐ {amt} звёзд", int(rub * RUB_TO_SILVER))
-
+# VIP 1
+for m, dia in VIP1.items():
+    ITEMS[f"vip1_{m}"] = {
+        "name": f"👑 VIP 1 ({m} мес)",
+        "dia": dia,
+        "silver": dia * DIAMOND_TO_SILVER,
+    }
+# VIP 2
+for m, dia in VIP2.items():
+    ITEMS[f"vip2_{m}"] = {
+        "name": f"👑 VIP 2 ({m} мес)",
+        "dia": dia,
+        "silver": dia * DIAMOND_TO_SILVER,
+    }
+# Звёзды — только серебро (рубли)
+for amt, rub in STARS_PRICES.items():
+    ITEMS[f"stars_{amt}"] = {
+        "name": f"⭐ {amt} звёзд",
+        "silver": int(rub * RUB_TO_SILVER),
+    }
+# Алмазы — только серебро (по курсу алмаза)
 for amt in DIAMONDS:
-    ITEMS[f"dia_{amt}"] = (f"💎 {amt} алмазов", amt * DIAMOND_TO_SILVER)
-
+    ITEMS[f"dia_{amt}"] = {
+        "name": f"💎 {amt} алмазов",
+        "silver": amt * DIAMOND_TO_SILVER,
+    }
+# Premium — только серебро (рубли)
 for m, rub in PREMIUM.items():
-    ITEMS[f"prem_{m}"] = (f"💠 Telegram Premium ({m} мес)", int(rub * RUB_TO_SILVER))
-
+    ITEMS[f"prem_{m}"] = {
+        "name": f"💠 Premium ({m} мес)",
+        "silver": int(rub * RUB_TO_SILVER),
+    }
+# Руны — двойная
 for k, dia in RUNES.items():
     name = "🧿 Руна сохранения" if k == "save" else "🧿 Руна защиты"
-    ITEMS[f"rune_{k}"] = (name, dia * DIAMOND_TO_SILVER)
-
+    ITEMS[f"rune_{k}"] = {
+        "name": name,
+        "dia": dia,
+        "silver": dia * DIAMOND_TO_SILVER,
+    }
+# Расходники — двойная
 for k, dia in CONSUMABLES.items():
     names = {"stone": "🧪 Камень очищения", "tag": "🧪 Бирка", "token": "🧪 Жетон смены имени"}
-    ITEMS[f"cons_{k}"] = (names[k], dia * DIAMOND_TO_SILVER)
+    ITEMS[f"cons_{k}"] = {
+        "name": names[k],
+        "dia": dia,
+        "silver": dia * DIAMOND_TO_SILVER,
+    }
 
 # ============ ХРАНИЛИЩА ============
 carts = {}
@@ -64,19 +107,42 @@ cart_owners = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
 def fmt(num):
-    if num >= 1_000_000:
-        return f"{num / 1_000_000:.2f} млн"
+    if num >= 1_000_000_000:
+        return f"{num / 1_000_000_000:.3f} млрд"
+    elif num >= 1_000_000:
+        return f"{num / 1_000_000:.3f} млн"
     elif num >= 1_000:
-        return f"{num / 1_000:.2f}к"
+        return f"{num / 1_000:.3f}к"
     return str(num)
 
 LINE = "━━━━━━━━━━━━━━━━━━"
 
-def block(title, silver):
-    return f"{LINE}\n{title}\n{LINE}\n💰 {fmt(silver)} серебра\n{LINE}"
+def block(item):
+    lines = [LINE, item["name"], LINE]
+    if "dia" in item:
+        lines.append(f"💎 {item['dia']} алмазов")
+        lines.append("   или")
+        lines.append(f"💰 {fmt(item['silver'])} серебра")
+    else:
+        lines.append(f"💰 {fmt(item['silver'])} серебра")
+    lines.append(LINE)
+    return "\n".join(lines)
 
-def block_best(title, silver):
-    return f"{LINE}\n{title}\n{LINE}\n💰 {fmt(silver)} серебра\n{LINE}\n🟢 💸 ВЫГОДНО"
+def stars_discount(amount):
+    base = STARS_PRICES[100] / 100
+    cur = STARS_PRICES[amount] / amount
+    if cur >= base:
+        return None
+    pct = (base - cur) / base * 100
+    return f"📊 Дешевле на {pct:.3f}% чем 100 звёзд"
+
+def block_stars(amount):
+    item = ITEMS[f"stars_{amount}"]
+    lines = [LINE, item["name"], LINE, f"💰 {fmt(item['silver'])} серебра", LINE]
+    disc = stars_discount(amount)
+    if disc:
+        lines.append(disc)
+    return "\n".join(lines)
 
 # ============ АВТОУДАЛЕНИЕ ============
 def delete_main_menu_later(chat_id, user_id, delay=300):
@@ -151,53 +217,58 @@ def item_kb(back_cb, key):
 def vip_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("VIP 1", callback_data="vip_1"),
-        types.InlineKeyboardButton("VIP 2", callback_data="vip_2"),
+        types.InlineKeyboardButton("VIP 1", callback_data="vip_type_1"),
+        types.InlineKeyboardButton("VIP 2", callback_data="vip_type_2"),
     )
     markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+    return markup
+
+def vip_periods_menu(vip_type):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    for m in (1, 3, 6, 12):
+        markup.add(types.InlineKeyboardButton(f"{m} мес", callback_data=f"vip{vip_type}_{m}"))
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_vip"))
     return markup
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_vip")
 def menu_vip(call):
     try:
-        bot.edit_message_text("👑 VIP\n\nВыбери вариант:", call.message.chat.id, call.message.message_id, reply_markup=vip_menu())
+        bot.edit_message_text("👑 VIP\n\nВыбери тип:", call.message.chat.id, call.message.message_id, reply_markup=vip_menu())
     except:
-        bot.send_message(call.message.chat.id, "👑 VIP\n\nВыбери вариант:", reply_markup=vip_menu())
+        bot.send_message(call.message.chat.id, "👑 VIP\n\nВыбери тип:", reply_markup=vip_menu())
+
+@bot.callback_query_handler(func=lambda call: call.data in ("vip_type_1", "vip_type_2"))
+def vip_type_cb(call):
+    t = call.data.split("_")[2]
+    try:
+        bot.edit_message_text(f"👑 VIP {t}\n\nВыбери срок:", call.message.chat.id, call.message.message_id,
+                              reply_markup=vip_periods_menu(t))
+    except:
+        bot.send_message(call.message.chat.id, f"👑 VIP {t}\n\nВыбери срок:", reply_markup=vip_periods_menu(t))
 
 @bot.message_handler(commands=['vip'])
 def vip_cmd(message):
     args = message.text.split()
     if len(args) == 1:
-        bot.send_message(message.chat.id, "👑 VIP\n\nВыбери вариант:", reply_markup=vip_menu())
+        bot.send_message(message.chat.id, "👑 VIP\n\nВыбери тип:", reply_markup=vip_menu())
         return
-    level = args[1]
-    if level in ("1", "2"):
-        send_item(message.chat.id, f"vip_{level}", "menu_vip")
-    else:
-        bot.send_message(message.chat.id, "❌ Укажи /vip 1 или /vip 2")
+    bot.send_message(message.chat.id, "❌ Используй меню: /start")
 
-@bot.callback_query_handler(func=lambda call: call.data in ("vip_1", "vip_2"))
-def vip_callback(call):
-    level = call.data.split("_")[1]
-    key = f"vip_{level}"
-    title, silver = ITEMS[key]
+@bot.callback_query_handler(func=lambda call: call.data.startswith("vip1_") or call.data.startswith("vip2_"))
+def vip_item_cb(call):
+    key = call.data
+    item = ITEMS[key]
     try:
-        bot.edit_message_text(block(title, silver), call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block(item), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_vip", key))
     except:
-        bot.send_message(call.message.chat.id, block(title, silver), reply_markup=item_kb("menu_vip", key))
+        bot.send_message(call.message.chat.id, block(item), reply_markup=item_kb("menu_vip", key))
 
 # ============ STARS ============
 def stars_menu():
     markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("100", callback_data="stars_100"),
-        types.InlineKeyboardButton("250", callback_data="stars_250"),
-        types.InlineKeyboardButton("500", callback_data="stars_500"),
-        types.InlineKeyboardButton("1000", callback_data="stars_1000"),
-        types.InlineKeyboardButton("2500", callback_data="stars_2500"),
-        types.InlineKeyboardButton("10000", callback_data="stars_10000"),
-    )
+    for amt in STARS_PRICES.keys():
+        markup.add(types.InlineKeyboardButton(f"{amt}", callback_data=f"stars_{amt}"))
     markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
     return markup
 
@@ -210,43 +281,23 @@ def menu_stars(call):
 
 @bot.message_handler(commands=['stars'])
 def stars_cmd(message):
-    args = message.text.split()
-    if len(args) == 1:
-        bot.send_message(message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
-        return
-    try:
-        amount = int(args[1])
-    except:
-        bot.send_message(message.chat.id, "❌ Укажи число: /stars 10000")
-        return
-    if amount not in STARS:
-        bot.send_message(message.chat.id, "❌ Доступно: 100, 250, 500, 1000, 2500, 10000")
-        return
-    send_item(message.chat.id, f"stars_{amount}", "menu_stars")
+    bot.send_message(message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("stars_"))
 def stars_callback(call):
-    amount = call.data.split("_")[1]
+    amount = int(call.data.split("_")[1])
     key = f"stars_{amount}"
-    title, silver = ITEMS[key]
-    text = block_best(title, silver) if amount == "10000" else block(title, silver)
     try:
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block_stars(amount), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_stars", key))
     except:
-        bot.send_message(call.message.chat.id, text, reply_markup=item_kb("menu_stars", key))
+        bot.send_message(call.message.chat.id, block_stars(amount), reply_markup=item_kb("menu_stars", key))
 
 # ============ DIAMONDS ============
 def diamonds_menu():
     markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("100", callback_data="dia_100"),
-        types.InlineKeyboardButton("300", callback_data="dia_300"),
-        types.InlineKeyboardButton("500", callback_data="dia_500"),
-        types.InlineKeyboardButton("1000", callback_data="dia_1000"),
-        types.InlineKeyboardButton("2500", callback_data="dia_2500"),
-        types.InlineKeyboardButton("5000", callback_data="dia_5000"),
-    )
+    for amt in DIAMONDS.keys():
+        markup.add(types.InlineKeyboardButton(f"{amt}", callback_data=f"dia_{amt}"))
     markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
     return markup
 
@@ -265,13 +316,12 @@ def diamonds_cmd(message):
 def diamonds_callback(call):
     amount = call.data.split("_")[1]
     key = f"dia_{amount}"
-    title, silver = ITEMS[key]
-    text = block_best(title, silver) if amount == "5000" else block(title, silver)
+    item = ITEMS[key]
     try:
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block(item), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_diamonds", key))
     except:
-        bot.send_message(call.message.chat.id, text, reply_markup=item_kb("menu_diamonds", key))
+        bot.send_message(call.message.chat.id, block(item), reply_markup=item_kb("menu_diamonds", key))
 
 # ============ RUNES ============
 def runes_menu():
@@ -292,27 +342,17 @@ def menu_runes(call):
 
 @bot.message_handler(commands=['rune'])
 def rune_cmd(message):
-    args = message.text.split()
-    if len(args) == 1:
-        bot.send_message(message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
-        return
-    key = args[1].lower()
-    if key in ("save", "сохр"):
-        send_item(message.chat.id, "rune_save", "menu_runes")
-    elif key in ("prot", "защ"):
-        send_item(message.chat.id, "rune_prot", "menu_runes")
-    else:
-        bot.send_message(message.chat.id, "❌ /rune save или /rune prot")
+    bot.send_message(message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rune_"))
 def rune_callback(call):
     key = call.data
-    title, silver = ITEMS[key]
+    item = ITEMS[key]
     try:
-        bot.edit_message_text(block(title, silver), call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block(item), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_runes", key))
     except:
-        bot.send_message(call.message.chat.id, block(title, silver), reply_markup=item_kb("menu_runes", key))
+        bot.send_message(call.message.chat.id, block(item), reply_markup=item_kb("menu_runes", key))
 
 # ============ PREMIUM ============
 def premium_menu():
@@ -334,31 +374,18 @@ def menu_premium(call):
 
 @bot.message_handler(commands=['premium'])
 def premium_cmd(message):
-    args = message.text.split()
-    if len(args) == 1:
-        bot.send_message(message.chat.id, "💠 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
-        return
-    try:
-        months = int(args[1])
-    except:
-        bot.send_message(message.chat.id, "❌ Укажи срок: /premium 12")
-        return
-    if months not in PREMIUM:
-        bot.send_message(message.chat.id, "❌ Доступно: 3, 6, 12")
-        return
-    send_item(message.chat.id, f"prem_{months}", "menu_premium")
+    bot.send_message(message.chat.id, "💠 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("prem_"))
 def premium_callback(call):
     months = call.data.split("_")[1]
     key = f"prem_{months}"
-    title, silver = ITEMS[key]
-    text = block_best(title, silver) if months == "12" else block(title, silver)
+    item = ITEMS[key]
     try:
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block(item), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_premium", key))
     except:
-        bot.send_message(call.message.chat.id, text, reply_markup=item_kb("menu_premium", key))
+        bot.send_message(call.message.chat.id, block(item), reply_markup=item_kb("menu_premium", key))
 
 # ============ CONSUMABLES ============
 def consumables_menu():
@@ -381,12 +408,12 @@ def menu_consumables(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cons_"))
 def consumables_callback(call):
     key = call.data
-    title, silver = ITEMS[key]
+    item = ITEMS[key]
     try:
-        bot.edit_message_text(block(title, silver), call.message.chat.id, call.message.message_id,
+        bot.edit_message_text(block(item), call.message.chat.id, call.message.message_id,
                               reply_markup=item_kb("menu_consumables", key))
     except:
-        bot.send_message(call.message.chat.id, block(title, silver), reply_markup=item_kb("menu_consumables", key))
+        bot.send_message(call.message.chat.id, block(item), reply_markup=item_kb("menu_consumables", key))
 
 @bot.message_handler(commands=['stone'])
 def stone_cmd(message):
@@ -402,13 +429,20 @@ def token_cmd(message):
 
 # ============ УНИВЕРСАЛЬНАЯ ОТПРАВКА ============
 def send_item(chat_id, key, back_cb):
-    title, silver = ITEMS[key]
-    text = block(title, silver)
-    if key in ("stars_10000", "dia_5000", "prem_12"):
-        text = block_best(title, silver)
-    bot.send_message(chat_id, text, reply_markup=item_kb(back_cb, key))
+    item = ITEMS[key]
+    bot.send_message(chat_id, block(item), reply_markup=item_kb(back_cb, key))
 
 # ============ КОРЗИНА ============
+def item_price_text(item):
+    has_dia = "dia" in item
+    has_silver = "silver" in item
+    if has_dia and has_silver:
+        return f"💎 {item['dia']} или 💰 {fmt(item['silver'])}"
+    elif has_dia:
+        return f"💎 {item['dia']} алмазов"
+    else:
+        return f"💰 {fmt(item['silver'])}"
+
 def cart_text(user_id):
     name = cart_owners.get(user_id, "Гость")
     items = carts.get(user_id, [])
@@ -420,11 +454,17 @@ def cart_text(user_id):
     start = page * 4
     end = start + 4
     for i, item in enumerate(items[start:end], start=start + 1):
-        lines.append(f"{i}. {item['name']} — {fmt(item['price'])}")
-    full_total = sum(it["price"] for it in items)
+        lines.append(f"{i}. {item['name']} — {item_price_text(item)}")
+    total_dia = sum(it["dia"] for it in items if "dia" in it)
+    total_silver = sum(it["silver"] for it in items if "silver" in it)
     lines.append("")
     lines.append(LINE)
-    lines.append(f"💰 Итого: {fmt(full_total)} серебра")
+    if total_dia > 0 and total_silver > 0:
+        lines.append(f"💰 Итого: 💎 {total_dia} или {fmt(total_silver)} серебра")
+    elif total_dia > 0:
+        lines.append(f"💎 Итого: {total_dia} алмазов")
+    else:
+        lines.append(f"💰 Итого: {fmt(total_silver)} серебра")
     lines.append(LINE)
     return "\n".join(lines)
 
@@ -470,10 +510,15 @@ def want_callback(call):
     if key not in ITEMS:
         bot.answer_callback_query(call.id, "❌ Товар не найден")
         return
-    title, price = ITEMS[key]
+    item = ITEMS[key]
     if user_id not in carts:
         carts[user_id] = []
-    carts[user_id].append({"key": key, "name": title, "price": price})
+    carts[user_id].append({
+        "key": key,
+        "name": item["name"],
+        "dia": item.get("dia"),
+        "silver": item.get("silver"),
+    })
     mid = cart_msgs.get(user_id)
     if mid:
         try:
@@ -579,7 +624,6 @@ def unknown(message):
 
 # ============ ЗАПУСК ============
 if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
     print("Бот запущен...")
     bot.infinity_polling()
