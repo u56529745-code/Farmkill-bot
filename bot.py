@@ -2,10 +2,23 @@ import telebot
 from telebot import types
 import threading
 import time
+import os
+from flask import Flask
 
 # ============ НАСТРОЙКИ ============
 TOKEN = "8814067918:AAHVt-7m6mCafGS8sCAuOE8N2SqNma_cvZM"
 bot = telebot.TeleBot(TOKEN)
+
+# ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Bot is running"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # ============ КУРСЫ ============
 RUB_TO_SILVER = 16700
@@ -566,5 +579,7 @@ def unknown(message):
 
 # ============ ЗАПУСК ============
 if __name__ == "__main__":
+    # Запускаем Flask в отдельном потоке
+    threading.Thread(target=run_flask, daemon=True).start()
     print("Бот запущен...")
     bot.infinity_polling()
