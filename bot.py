@@ -9,7 +9,7 @@ from flask import Flask
 TOKEN = "8814067918:AAHuKBx72jA_2Zx1cnqIO_H1Bdw3L9rrVww"
 bot = telebot.TeleBot(TOKEN)
 
-# ============ ВЕБ-СЕРВЕР ============
+# ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
 app = Flask(__name__)
 
 @app.route('/')
@@ -39,6 +39,7 @@ RUNES = {"save": 240, "prot": 240}
 CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
 
 # ============ БАЗА ТОВАРОВ ============
+# key: {"name": str, "dia": int (опционально), "silver": int}
 ITEMS = {}
 
 for m, dia in VIP1.items():
@@ -64,11 +65,12 @@ menu_msgs = {}
 cart_msgs = {}
 cart_pages = {}
 cart_owners = {}
-# Счётчики добавления в сообщении товара: {user_id: {message_id: count}}
 add_counters = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
 def fmt(num):
+    if num is None:
+        return "—"
     if num >= 1_000_000_000:
         return f"{num / 1_000_000_000:.3f} млрд"
     elif num >= 1_000_000:
@@ -81,12 +83,16 @@ LINE = "━━━━━━━━━━━━━━━━━━"
 
 def block(item, added=0):
     lines = [LINE, item["name"], LINE]
-    if "dia" in item:
-        lines.append(f"💎 {item['dia']} алмазов")
+    dia = item.get("dia")
+    silver = item.get("silver")
+    if dia and silver:
+        lines.append(f"💎 {dia} алмазов")
         lines.append("   или")
-        lines.append(f"💰 {fmt(item['silver'])} серебра")
-    else:
-        lines.append(f"💰 {fmt(item['silver'])} серебра")
+        lines.append(f"💰 {fmt(silver)} серебра")
+    elif dia:
+        lines.append(f"💎 {dia} алмазов")
+    elif silver:
+        lines.append(f"💰 {fmt(silver)} серебра")
     lines.append(LINE)
     if added > 0:
         lines.append(f"✅ Добавлено в корзину: {added}")
@@ -179,6 +185,21 @@ def item_kb(back_cb, key):
         types.InlineKeyboardButton("🛒 Хочу", callback_data=f"w|{key}"),
     )
     return markup
+
+def item_kb_from_key(key):
+    if key.startswith("vip1_") or key.startswith("vip2_"):
+        return item_kb("menu_vip", key)
+    elif key.startswith("stars_"):
+        return item_kb("menu_stars", key)
+    elif key.startswith("dia_"):
+        return item_kb("menu_diamonds", key)
+    elif key.startswith("rune_"):
+        return item_kb("menu_runes", key)
+    elif key.startswith("prem_"):
+        return item_kb("menu_premium", key)
+    elif key.startswith("cons_"):
+        return item_kb("menu_consumables", key)
+    return item_kb("back_main", key)
 
 # ============ VIP ============
 def vip_menu():
@@ -398,30 +419,30 @@ def consumables_callback(call):
 
 @bot.message_handler(commands=['stone'])
 def stone_cmd(message):
-    send_item(message.chat.id, "cons_stone", "menu_consumables")
+    item = ITEMS["cons_stone"]
+    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_stone"))
 
 @bot.message_handler(commands=['tag'])
 def tag_cmd(message):
-    send_item(message.chat.id, "cons_tag", "menu_consumables")
+    item = ITEMS["cons_tag"]
+    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_tag"))
 
 @bot.message_handler(commands=['token'])
 def token_cmd(message):
-    send_item(message.chat.id, "cons_token", "menu_consumables")
-
-def send_item(chat_id, key, back_cb):
-    item = ITEMS[key]
-    bot.send_message(chat_id, block(item), reply_markup=item_kb(back_cb, key))
+    item = ITEMS["cons_token"]
+    bot.send_message(message.chat.id, block(item), reply_markup=item_kb("menu_consumables", "cons_token"))
 
 # ============ КОРЗИНА ============
 def item_price_text(item):
-    has_dia = "dia" in item
-    has_silver = "silver" in item
-    if has_dia and has_silver:
-        return f"💎 {item['dia']} или 💰 {fmt(item['silver'])}"
-    elif has_dia:
-        return f"💎 {item['dia']} алмазов"
-    else:
-        return f"💰 {fmt(item['silver'])}"
+    dia = item.get("dia")
+    silver = item.get("silver")
+    if dia and silver:
+        return f"💎 {dia} или 💰 {fmt(silver)}"
+    elif dia:
+        return f"💎 {dia} алмазов"
+    elif silver:
+        return f"💰 {fmt(silver)}"
+    return "—"
 
 def cart_text(user_id):
     name = cart_owners.get(user_id, "Гость")
@@ -435,16 +456,18 @@ def cart_text(user_id):
     end = start + 4
     for i, item in enumerate(items[start:end], start=start + 1):
         lines.append(f"{i}. {item['name']} — {item_price_text(item)}")
-    total_dia = sum(it["dia"] for it in items if "dia" in it)
-    total_silver = sum(it["silver"] for it in items if "silver" in it)
+    total_dia = sum(it.get("dia", 0) for it in items if it.get("dia"))
+    total_silver = sum(it.get("silver", 0) for it in items if it.get("silver"))
     lines.append("")
     lines.append(LINE)
     if total_dia > 0 and total_silver > 0:
         lines.append(f"💰 Итого: 💎 {total_dia} или {fmt(total_silver)} серебра")
     elif total_dia > 0:
         lines.append(f"💎 Итого: {total_dia} алмазов")
-    else:
+    elif total_silver > 0:
         lines.append(f"💰 Итого: {fmt(total_silver)} серебра")
+    else:
+        lines.append("Итого: 0")
     lines.append(LINE)
     return "\n".join(lines)
 
@@ -493,20 +516,19 @@ def want_callback(call):
     item = ITEMS[key]
     if user_id not in carts:
         carts[user_id] = []
-    carts[user_id].append({
-        "key": key,
-        "name": item["name"],
-        "dia": item.get("dia"),
-        "silver": item.get("silver"),
-    })
-    # Увеличиваем счётчик для этого сообщения
+    entry = {"key": key, "name": item["name"]}
+    if item.get("dia"):
+        entry["dia"] = item["dia"]
+    if item.get("silver"):
+        entry["silver"] = item["silver"]
+    carts[user_id].append(entry)
+
     mid = call.message.message_id
     if user_id not in add_counters:
         add_counters[user_id] = {}
     add_counters[user_id][mid] = add_counters[user_id].get(mid, 0) + 1
     added = add_counters[user_id][mid]
 
-    # Обновляем сообщение с товаром (кнопка снова активна)
     if key.startswith("stars_"):
         amount = int(key.split("_")[1])
         text = block_stars(amount, added)
@@ -518,7 +540,6 @@ def want_callback(call):
     except:
         pass
 
-    # Обновляем корзину
     cart_mid = cart_msgs.get(user_id)
     if cart_mid:
         try:
@@ -528,22 +549,6 @@ def want_callback(call):
     else:
         render_cart(user_id, call.message.chat.id)
     bot.answer_callback_query(call.id, "✅ Добавлено в корзину")
-
-def item_kb_from_key(key):
-    """Определяет, какая «Назад» кнопка нужна для товара"""
-    if key.startswith("vip1_") or key.startswith("vip2_"):
-        return item_kb("menu_vip", key)
-    elif key.startswith("stars_"):
-        return item_kb("menu_stars", key)
-    elif key.startswith("dia_"):
-        return item_kb("menu_diamonds", key)
-    elif key.startswith("rune_"):
-        return item_kb("menu_runes", key)
-    elif key.startswith("prem_"):
-        return item_kb("menu_premium", key)
-    elif key.startswith("cons_"):
-        return item_kb("menu_consumables", key)
-    return item_kb("back_main", key)
 
 # ============ УДАЛЕНИЕ ============
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rm|"))
