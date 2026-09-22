@@ -66,6 +66,7 @@ cart_pages = {}
 cart_owners = {}
 add_counters = {}
 owners = {}
+wrong_clicks = [0]
 
 # ============ ФОРМАТИРОВАНИЕ ============
 def fmt(num):
@@ -123,7 +124,11 @@ def check_owner(call):
         owners[call.message.message_id] = call.from_user.id
         return True
     if owner != call.from_user.id:
-        bot.answer_callback_query(call.id, "Иди нахуй")
+        wrong_clicks[0] += 1
+        if (wrong_clicks[0] - 1) // 5 % 2 == 0:
+            bot.answer_callback_query(call.id, "Иди нахуй")
+        else:
+            bot.answer_callback_query(call.id, "Шут придёт, по попе атата")
         return False
     return True
 
