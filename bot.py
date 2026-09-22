@@ -13,69 +13,26 @@ DIAMOND_TO_SILVER = 16700
 
 # ============ ЦЕНЫ ============
 STARS = {
-    100: 181.99,
-    250: 429.00,
-    500: 849.00,
-    1000: 1679.00,
-    2500: 4199.00,
-    10000: 16599.00,
+    100: 181.99, 250: 429.00, 500: 849.00,
+    1000: 1679.00, 2500: 4199.00, 10000: 16599.00,
 }
+DIAMONDS = {100: 100, 300: 300, 500: 500, 1000: 1000, 2500: 2500, 5000: 5000}
+VIP = {1: 2400, 2: 1500}
+PREMIUM = {3: 1049.00, 6: 1399.00, 12: 2539.00}
+RUNES = {"save": 240, "prot": 240}
+CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
 
-DIAMONDS = {
-    100: 100,
-    300: 300,
-    500: 500,
-    1000: 1000,
-    2500: 2500,
-    5000: 5000,
-}
-
-VIP = {
-    1: 2400,
-    2: 1500,
-}
-
-PREMIUM = {
-    3: 1049.00,
-    6: 1399.00,
-    12: 2539.00,
-}
-
-RUNES = {
-    "save": 240,
-    "prot": 240,
-}
-
-CONSUMABLES = {
-    "stone": 160,
-    "tag": 100,
-    "token": 200,
-}
-
-# ============ АВТОУДАЛЕНИЕ ============
-def send_and_delete(chat_id, text, reply_markup=None, delay=30):
-    msg = bot.send_message(chat_id, text, reply_markup=reply_markup)
-    def delete_later():
-        time.sleep(delay)
-        try:
-            bot.delete_message(chat_id, msg.message_id)
-        except:
-            pass
-    threading.Thread(target=delete_later, daemon=True).start()
-    return msg
-
-def edit_and_delete(chat_id, message_id, text, reply_markup=None, delay=30):
-    try:
-        bot.edit_message_text(text, chat_id, message_id, reply_markup=reply_markup)
-    except:
-        pass
-    def delete_later():
-        time.sleep(delay)
-        try:
-            bot.delete_message(chat_id, message_id)
-        except:
-            pass
-    threading.Thread(target=delete_later, daemon=True).start()
+# ============ ХРАНИЛИЩА ============
+# cart[user_id] = [{"key": "...", "name": "...", "price": ...}, ...]
+carts = {}
+# menu_msg[user_id] = message_id главного меню (для удаления через 5 мин)
+menu_msgs = {}
+# cart_msg[user_id] = message_id сообщения корзины (для редактирования)
+cart_msgs = {}
+# cart_page[user_id] = текущая страница корзины
+cart_pages = {}
+# cart_owner[user_id] = имя владельца
+cart_owners = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
 def fmt(num):
@@ -85,7 +42,7 @@ def fmt(num):
         return f"{num / 1_000:.2f}к"
     return str(num)
 
-def block(symbol, title, silver):
+def block(title, silver):
     return (
         f"╔══════════════════════╗\n"
         f"║   {title}\n"
@@ -94,7 +51,7 @@ def block(symbol, title, silver):
         f"╚══════════════════════╝"
     )
 
-def block_best(symbol, title, silver):
+def block_best(title, silver):
     return (
         f"╔══════════════════════╗\n"
         f"║   {title}\n"
@@ -103,6 +60,19 @@ def block_best(symbol, title, silver):
         f"╚══════════════════════╝\n"
         f"      🟢 💸 ВЫГОДНО"
     )
+
+# ============ АВТОУДАЛЕНИЕ ГЛАВНОГО МЕНЮ (5 мин) ============
+def delete_main_menu_later(chat_id, user_id, delay=300):
+    def worker():
+        time.sleep(delay)
+        try:
+            mid = menu_msgs.get(user_id)
+            if mid:
+                bot.delete_message(chat_id, mid)
+                del menu_msgs[user_id]
+        except:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
 
 # ============ ГЛАВНОЕ МЕНЮ ============
 def main_menu():
@@ -117,9 +87,8 @@ def main_menu():
     )
     return markup
 
-@bot.message_handler(commands=['start', 'help'])
-def start_cmd(message):
-    text = (
+def main_menu_text():
+    return (
         "╔══════════════════════╗\n"
         "║   🎮 FARMKILL\n"
         "╚══════════════════════╝\n\n"
@@ -129,7 +98,50 @@ def start_cmd(message):
         "иначе он не сможет удалять свои сообщения.\n\n"
         "👨‍💻 Разработчик — @yra228kil1"
     )
-    send_and_delete(message.chat.id, text, reply_markup=main_menu())
+
+@bot.message_handler(commands=['start', 'help'])
+def start_cmd(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    # Удаляем старую корзину пользователя
+    old_cart_msg = cart_msgs.get(user_id)
+    if old_cart_msg:
+        try:
+            bot.delete_message(chat_id, old_cart_msg)
+        except:
+            pass
+    carts[user_id] = []
+    cart_msgs[user_id] = None
+    cart_pages[user_id] = 0
+
+    # Сохраняем имя
+    name = message.from_user.username
+    if name:
+        cart_owners[user_id] = "@" + name
+    else:
+        cart_owners[user_id] = message.from_user.first_name or "Гость"
+
+    # Удаляем старое главное меню
+    old_menu = menu_msgs.get(user_id)
+    if old_menu:
+        try:
+            bot.delete_message(chat_id, old_menu)
+        except:
+            pass
+
+    msg = bot.send_message(chat_id, main_menu_text(), reply_markup=main_menu())
+    menu_msgs[user_id] = msg.message_id
+    delete_main_menu_later(chat_id, user_id)
+
+# ============ ХЕЛПЕРЫ ДЛЯ ТОВАРОВ ============
+def item_kb(back_cb, want_key, want_name, want_price):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔙 Назад", callback_data=back_cb),
+        types.InlineKeyboardButton("🛒 Хочу", callback_data=f"want|{want_key}|{want_name}|{want_price}"),
+    )
+    return markup
 
 # ============ VIP ============
 def vip_menu():
@@ -143,42 +155,41 @@ def vip_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_vip")
 def menu_vip(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "👑 VIP\n\nВыбери вариант:",
-        vip_menu()
-    )
+    try:
+        bot.edit_message_text("👑 VIP\n\nВыбери вариант:", call.message.chat.id,
+                              call.message.message_id, reply_markup=vip_menu())
+    except:
+        bot.send_message(call.message.chat.id, "👑 VIP\n\nВыбери вариант:", reply_markup=vip_menu())
 
 @bot.message_handler(commands=['vip'])
 def vip_cmd(message):
     args = message.text.split()
     if len(args) == 1:
-        send_and_delete(message.chat.id, "👑 VIP\n\nВыбери вариант:", reply_markup=vip_menu())
+        bot.send_message(message.chat.id, "👑 VIP\n\nВыбери вариант:", reply_markup=vip_menu())
         return
     level = args[1]
-    if level == "1":
-        send_vip(message.chat.id, 1)
-    elif level == "2":
-        send_vip(message.chat.id, 2)
+    if level in ("1", "2"):
+        send_vip(message.chat.id, int(level))
     else:
-        send_and_delete(message.chat.id, "❌ Укажи /vip 1 или /vip 2")
+        bot.send_message(message.chat.id, "❌ Укажи /vip 1 или /vip 2")
 
 def send_vip(chat_id, level):
     silver = VIP[level] * DIAMOND_TO_SILVER
     title = f"👑 VIP {level} (1 месяц)"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_vip"))
-    send_and_delete(chat_id, block("✦", title, silver), reply_markup=markup)
+    bot.send_message(chat_id, block(title, silver),
+                     reply_markup=item_kb("menu_vip", f"vip_{level}", title, silver))
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("vip_"))
+@bot.callback_query_handler(func=lambda call: call.data in ("vip_1", "vip_2"))
 def vip_callback(call):
     level = int(call.data.split("_")[1])
     silver = VIP[level] * DIAMOND_TO_SILVER
     title = f"👑 VIP {level} (1 месяц)"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_vip"))
-    send_and_delete(call.message.chat.id, block("✦", title, silver), reply_markup=markup)
+    try:
+        bot.edit_message_text(block(title, silver), call.message.chat.id,
+                              call.message.message_id,
+                              reply_markup=item_kb("menu_vip", f"vip_{level}", title, silver))
+    except:
+        send_vip(call.message.chat.id, level)
 
 # ============ STARS ============
 def stars_menu():
@@ -196,43 +207,46 @@ def stars_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_stars")
 def menu_stars(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "⭐ Звёзды\n\nВыбери количество:",
-        stars_menu()
-    )
+    try:
+        bot.edit_message_text("⭐ Звёзды\n\nВыбери количество:", call.message.chat.id,
+                              call.message.message_id, reply_markup=stars_menu())
+    except:
+        bot.send_message(call.message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
 
 @bot.message_handler(commands=['stars'])
 def stars_cmd(message):
     args = message.text.split()
     if len(args) == 1:
-        send_and_delete(message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
+        bot.send_message(message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
         return
     try:
         amount = int(args[1])
     except:
-        send_and_delete(message.chat.id, "❌ Укажи число: /stars 10000")
+        bot.send_message(message.chat.id, "❌ Укажи число: /stars 10000")
         return
     send_stars(message.chat.id, amount)
 
 def send_stars(chat_id, amount):
     if amount not in STARS:
-        send_and_delete(chat_id, "❌ Доступно: 100, 250, 500, 1000, 2500, 10000")
+        bot.send_message(chat_id, "❌ Доступно: 100, 250, 500, 1000, 2500, 10000")
         return
     silver = STARS[amount] * RUB_TO_SILVER
     title = f"⭐ {amount} звёзд"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_stars"))
-    if amount == 10000:
-        send_and_delete(chat_id, block_best("⭐", title, silver), reply_markup=markup)
-    else:
-        send_and_delete(chat_id, block("⭐", title, silver), reply_markup=markup)
+    text = block_best(title, silver) if amount == 10000 else block(title, silver)
+    bot.send_message(chat_id, text,
+                     reply_markup=item_kb("menu_stars", f"stars_{amount}", title, silver))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("stars_"))
 def stars_callback(call):
     amount = int(call.data.split("_")[1])
-    send_stars(call.message.chat.id, amount)
+    silver = STARS[amount] * RUB_TO_SILVER
+    title = f"⭐ {amount} звёзд"
+    text = block_best(title, silver) if amount == 10000 else block(title, silver)
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                              reply_markup=item_kb("menu_stars", f"stars_{amount}", title, silver))
+    except:
+        send_stars(call.message.chat.id, amount)
 
 # ============ DIAMONDS ============
 def diamonds_menu():
@@ -250,31 +264,34 @@ def diamonds_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_diamonds")
 def menu_diamonds(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "💎 Алмазы\n\nВыбери количество:",
-        diamonds_menu()
-    )
+    try:
+        bot.edit_message_text("💎 Алмазы\n\nВыбери количество:", call.message.chat.id,
+                              call.message.message_id, reply_markup=diamonds_menu())
+    except:
+        bot.send_message(call.message.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=diamonds_menu())
 
 @bot.message_handler(commands=['diamonds'])
 def diamonds_cmd(message):
-    send_and_delete(message.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=diamonds_menu())
+    bot.send_message(message.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=diamonds_menu())
 
 def send_diamonds(chat_id, amount):
     silver = amount * DIAMOND_TO_SILVER
     title = f"💎 {amount} алмазов"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_diamonds"))
-    if amount == 5000:
-        send_and_delete(chat_id, block_best("💎", title, silver), reply_markup=markup)
-    else:
-        send_and_delete(chat_id, block("💎", title, silver), reply_markup=markup)
+    text = block_best(title, silver) if amount == 5000 else block(title, silver)
+    bot.send_message(chat_id, text,
+                     reply_markup=item_kb("menu_diamonds", f"dia_{amount}", title, silver))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("dia_"))
 def diamonds_callback(call):
     amount = int(call.data.split("_")[1])
-    send_diamonds(call.message.chat.id, amount)
+    silver = amount * DIAMOND_TO_SILVER
+    title = f"💎 {amount} алмазов"
+    text = block_best(title, silver) if amount == 5000 else block(title, silver)
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                              reply_markup=item_kb("menu_diamonds", f"dia_{amount}", title, silver))
+    except:
+        send_diamonds(call.message.chat.id, amount)
 
 # ============ RUNES ============
 def runes_menu():
@@ -288,18 +305,17 @@ def runes_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_runes")
 def menu_runes(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "⚜️ Руны\n\nВыбери руну:",
-        runes_menu()
-    )
+    try:
+        bot.edit_message_text("⚜️ Руны\n\nВыбери руну:", call.message.chat.id,
+                              call.message.message_id, reply_markup=runes_menu())
+    except:
+        bot.send_message(call.message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
 
 @bot.message_handler(commands=['rune'])
 def rune_cmd(message):
     args = message.text.split()
     if len(args) == 1:
-        send_and_delete(message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
+        bot.send_message(message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
         return
     key = args[1].lower()
     if key in ("save", "сохр"):
@@ -307,19 +323,25 @@ def rune_cmd(message):
     elif key in ("prot", "защ"):
         send_rune(message.chat.id, "prot")
     else:
-        send_and_delete(message.chat.id, "❌ /rune save или /rune prot")
+        bot.send_message(message.chat.id, "❌ /rune save или /rune prot")
 
 def send_rune(chat_id, key):
     silver = RUNES[key] * DIAMOND_TO_SILVER
     title = "🧿 Руна сохранения" if key == "save" else "🧿 Руна защиты"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_runes"))
-    send_and_delete(chat_id, block("⚜️", title, silver), reply_markup=markup)
+    bot.send_message(chat_id, block(title, silver),
+                     reply_markup=item_kb("menu_runes", f"rune_{key}", title, silver))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rune_"))
 def rune_callback(call):
     key = call.data.split("_")[1]
-    send_rune(call.message.chat.id, key)
+    silver = RUNES[key] * DIAMOND_TO_SILVER
+    title = "🧿 Руна сохранения" if key == "save" else "🧿 Руна защиты"
+    try:
+        bot.edit_message_text(block(title, silver), call.message.chat.id,
+                              call.message.message_id,
+                              reply_markup=item_kb("menu_runes", f"rune_{key}", title, silver))
+    except:
+        send_rune(call.message.chat.id, key)
 
 # ============ PREMIUM ============
 def premium_menu():
@@ -334,43 +356,46 @@ def premium_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_premium")
 def menu_premium(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "📱 Telegram Premium\n\nВыбери срок:",
-        premium_menu()
-    )
+    try:
+        bot.edit_message_text("📱 Telegram Premium\n\nВыбери срок:", call.message.chat.id,
+                              call.message.message_id, reply_markup=premium_menu())
+    except:
+        bot.send_message(call.message.chat.id, "📱 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
 
 @bot.message_handler(commands=['premium'])
 def premium_cmd(message):
     args = message.text.split()
     if len(args) == 1:
-        send_and_delete(message.chat.id, "📱 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
+        bot.send_message(message.chat.id, "📱 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
         return
     try:
         months = int(args[1])
     except:
-        send_and_delete(message.chat.id, "❌ Укажи срок: /premium 12")
+        bot.send_message(message.chat.id, "❌ Укажи срок: /premium 12")
         return
     send_premium(message.chat.id, months)
 
 def send_premium(chat_id, months):
     if months not in PREMIUM:
-        send_and_delete(chat_id, "❌ Доступно: 3, 6, 12")
+        bot.send_message(chat_id, "❌ Доступно: 3, 6, 12")
         return
     silver = PREMIUM[months] * RUB_TO_SILVER
     title = f"📱 Telegram Premium ({months} мес)"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_premium"))
-    if months == 12:
-        send_and_delete(chat_id, block_best("💠", title, silver), reply_markup=markup)
-    else:
-        send_and_delete(chat_id, block("💠", title, silver), reply_markup=markup)
+    text = block_best(title, silver) if months == 12 else block(title, silver)
+    bot.send_message(chat_id, text,
+                     reply_markup=item_kb("menu_premium", f"prem_{months}", title, silver))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("prem_"))
 def premium_callback(call):
     months = int(call.data.split("_")[1])
-    send_premium(call.message.chat.id, months)
+    silver = PREMIUM[months] * RUB_TO_SILVER
+    title = f"📱 Telegram Premium ({months} мес)"
+    text = block_best(title, silver) if months == 12 else block(title, silver)
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                              reply_markup=item_kb("menu_premium", f"prem_{months}", title, silver))
+    except:
+        send_premium(call.message.chat.id, months)
 
 # ============ CONSUMABLES ============
 def consumables_menu():
@@ -385,28 +410,31 @@ def consumables_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_consumables")
 def menu_consumables(call):
-    edit_and_delete(
-        call.message.chat.id,
-        call.message.message_id,
-        "📦 Расходники\n\nВыбери предмет:",
-        consumables_menu()
-    )
+    try:
+        bot.edit_message_text("📦 Расходники\n\nВыбери предмет:", call.message.chat.id,
+                              call.message.message_id, reply_markup=consumables_menu())
+    except:
+        bot.send_message(call.message.chat.id, "📦 Расходники\n\nВыбери предмет:", reply_markup=consumables_menu())
 
 def send_consumable(chat_id, key):
     silver = CONSUMABLES[key] * DIAMOND_TO_SILVER
-    titles = {
-        "stone": "🧪 Камень очищения",
-        "tag": "🧪 Бирка",
-        "token": "🧪 Жетон смены имени",
-    }
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="menu_consumables"))
-    send_and_delete(chat_id, block("📦", titles[key], silver), reply_markup=markup)
+    titles = {"stone": "🧪 Камень очищения", "tag": "🧪 Бирка", "token": "🧪 Жетон смены имени"}
+    title = titles[key]
+    bot.send_message(chat_id, block(title, silver),
+                     reply_markup=item_kb("menu_consumables", f"cons_{key}", title, silver))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cons_"))
 def consumables_callback(call):
     key = call.data.split("_")[1]
-    send_consumable(call.message.chat.id, key)
+    silver = CONSUMABLES[key] * DIAMOND_TO_SILVER
+    titles = {"stone": "🧪 Камень очищения", "tag": "🧪 Бирка", "token": "🧪 Жетон смены имени"}
+    title = titles[key]
+    try:
+        bot.edit_message_text(block(title, silver), call.message.chat.id,
+                              call.message.message_id,
+                              reply_markup=item_kb("menu_consumables", f"cons_{key}", title, silver))
+    except:
+        send_consumable(call.message.chat.id, key)
 
 @bot.message_handler(commands=['stone'])
 def stone_cmd(message):
@@ -420,25 +448,180 @@ def tag_cmd(message):
 def token_cmd(message):
     send_consumable(message.chat.id, "token")
 
-# ============ НАЗАД В ГЛАВНОЕ ============
+# ============ КОРЗИНА ============
+def cart_text(user_id):
+    name = cart_owners.get(user_id, "Гость")
+    items = carts.get(user_id, [])
+    lines = [f"🛒 КОРЗИНА {name}", ""]
+    if not items:
+        lines.append("Корзина пуста")
+        return "\n".join(lines)
+    total = 0
+    page = cart_pages.get(user_id, 0)
+    start = page * 4
+    end = start + 4
+    for i, item in enumerate(items[start:end], start=start + 1):
+        lines.append(f"{i}. {item['name']} — {fmt(item['price'])}")
+        total += item["price"]
+    # Общая сумма всех товаров (не только страницы)
+    full_total = sum(it["price"] for it in items)
+    lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(f"💰 Итого: {fmt(full_total)} серебра")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+def cart_kb(user_id):
+    items = carts.get(user_id, [])
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    page = cart_pages.get(user_id, 0)
+    start = page * 4
+    end = start + 4
+    # Кнопки-крестики для товаров на странице
+    for i, item in enumerate(items[start:end], start=start):
+        markup.add(types.InlineKeyboardButton(f"❌ {item['name']}", callback_data=f"rm|{i}"))
+    # Навигация страниц
+    total_pages = max(1, (len(items) + 3) // 4)
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("⬅️", callback_data="cart_prev"))
+    nav.append(types.InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="cart_noop"))
+    if end < len(items):
+        nav.append(types.InlineKeyboardButton("➡️", callback_data="cart_next"))
+    if nav:
+        markup.row(*nav)
+    # Очистить всё
+    if items:
+        markup.add(types.InlineKeyboardButton("🗑 Очистить всё", callback_data="cart_clear"))
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="cart_back"))
+    return markup
+
+def render_cart(user_id, chat_id, message_id=None):
+    text = cart_text(user_id)
+    kb = cart_kb(user_id)
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
+            return
+        except:
+            pass
+    msg = bot.send_message(chat_id, text, reply_markup=kb)
+    cart_msgs[user_id] = msg.message_id
+
+# ============ ХОЧУ ============
+@bot.callback_query_handler(func=lambda call: call.data.startswith("want|"))
+def want_callback(call):
+    user_id = call.from_user.id
+    _, key, name, price = call.data.split("|")
+    price = int(price)
+    if user_id not in carts:
+        carts[user_id] = []
+    carts[user_id].append({"key": key, "name": name, "price": price})
+    # Если корзина уже была — редактируем
+    mid = cart_msgs.get(user_id)
+    if mid:
+        try:
+            render_cart(user_id, call.message.chat.id, mid)
+            bot.answer_callback_query(call.id, "✅ Добавлено в корзину")
+            return
+        except:
+            pass
+    render_cart(user_id, call.message.chat.id)
+    bot.answer_callback_query(call.id, "✅ Добавлено в корзину")
+
+# ============ УДАЛЕНИЕ ТОВАРА (❌) ============
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rm|"))
+def remove_item(call):
+    user_id = call.from_user.id
+    idx = int(call.data.split("|")[1])
+    items = carts.get(user_id, [])
+    if 0 <= idx < len(items):
+        items.pop(idx)
+    # Сброс страницы, если вышли за границы
+    page = cart_pages.get(user_id, 0)
+    total_pages = max(1, (len(items) + 3) // 4)
+    if page >= total_pages:
+        page = total_pages - 1
+        cart_pages[user_id] = page
+    # Удаляем сообщение корзины, если она опустела
+    if not items:
+        mid = cart_msgs.get(user_id)
+        if mid:
+            try:
+                bot.delete_message(call.message.chat.id, mid)
+            except:
+                pass
+        cart_msgs[user_id] = None
+        bot.answer_callback_query(call.id, "🗑 Корзина очищена")
+        return
+    render_cart(user_id, call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id, "❌ Удалено")
+
+# ============ ОЧИСТИТЬ ВСЁ ============
+@bot.callback_query_handler(func=lambda call: call.data == "cart_clear")
+def cart_clear(call):
+    user_id = call.from_user.id
+    carts[user_id] = []
+    mid = cart_msgs.get(user_id)
+    if mid:
+        try:
+            bot.delete_message(call.message.chat.id, mid)
+        except:
+            pass
+    cart_msgs[user_id] = None
+    bot.answer_callback_query(call.id, "🗑 Корзина очищена")
+
+# ============ НАВИГАЦИЯ СТРАНИЦ ============
+@bot.callback_query_handler(func=lambda call: call.data == "cart_prev")
+def cart_prev(call):
+    user_id = call.from_user.id
+    cart_pages[user_id] = max(0, cart_pages.get(user_id, 0) - 1)
+    render_cart(user_id, call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cart_next")
+def cart_next(call):
+    user_id = call.from_user.id
+    items = carts.get(user_id, [])
+    total_pages = max(1, (len(items) + 3) // 4)
+    cart_pages[user_id] = min(total_pages - 1, cart_pages.get(user_id, 0) + 1)
+    render_cart(user_id, call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cart_noop")
+def cart_noop(call):
+    bot.answer_callback_query(call.id)
+
+# ============ НАЗАД ИЗ КОРЗИНЫ ============
+@bot.callback_query_handler(func=lambda call: call.data == "cart_back")
+def cart_back(call):
+    user_id = call.from_user.id
+    # Удаляем корзину и показываем главное меню заново
+    mid = cart_msgs.get(user_id)
+    if mid:
+        try:
+            bot.delete_message(call.message.chat.id, mid)
+        except:
+            pass
+    cart_msgs[user_id] = None
+    msg = bot.send_message(call.message.chat.id, main_menu_text(), reply_markup=main_menu())
+    menu_msgs[user_id] = msg.message_id
+    delete_main_menu_later(call.message.chat.id, user_id)
+
+# ============ НАЗАД В ГЛАВНОЕ МЕНЮ ============
 @bot.callback_query_handler(func=lambda call: call.data == "back_main")
 def back_main(call):
-    text = (
-        "╔══════════════════════╗\n"
-        "║   🎮 FARMKILL\n"
-        "╚══════════════════════╝\n\n"
-        "👋 Привет! Я помогу с выбором и валютой.\n\n"
-        "Выбери ниже, что хочешь:\n\n"
-        "⚠️ В группах дай боту админку,\n"
-        "иначе он не сможет удалять свои сообщения.\n\n"
-        "👨‍💻 Разработчик — @yra228kil1"
-    )
-    edit_and_delete(call.message.chat.id, call.message.message_id, text, main_menu())
+    user_id = call.from_user.id
+    try:
+        bot.edit_message_text(main_menu_text(), call.message.chat.id,
+                              call.message.message_id, reply_markup=main_menu())
+    except:
+        msg = bot.send_message(call.message.chat.id, main_menu_text(), reply_markup=main_menu())
+        menu_msgs[user_id] = msg.message_id
+        delete_main_menu_later(call.message.chat.id, user_id)
 
 # ============ НЕИЗВЕСТНАЯ КОМАНДА ============
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
-    send_and_delete(
+    bot.send_message(
         message.chat.id,
         "❌ Команда не распознана.\n"
         "Напишите ещё раз и проверьте написание\n"
