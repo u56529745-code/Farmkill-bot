@@ -39,7 +39,6 @@ RUNES = {"save": 240, "prot": 240}
 CONSUMABLES = {"stone": 160, "tag": 100, "token": 200}
 
 # ============ БАЗА ТОВАРОВ ============
-# key: {"name": str, "dia": int (опционально), "silver": int}
 ITEMS = {}
 
 for m, dia in VIP1.items():
@@ -66,6 +65,8 @@ cart_msgs = {}
 cart_pages = {}
 cart_owners = {}
 add_counters = {}
+# owners[message_id] = user_id (кто создал меню/товар/корзину)
+owners = {}
 
 # ============ ФОРМАТИРОВАНИЕ ============
 def fmt(num):
@@ -116,6 +117,19 @@ def block_stars(amount, added=0):
         lines.append(f"✅ Добавлено в корзину: {added}")
     return "\n".join(lines)
 
+# ============ ПРОВЕРКА ВЛАДЕЛЬЦА ============
+def check_owner(call):
+    """Проверяет, что нажал владелец меню. Возвращает True, если ок."""
+    owner = owners.get(call.message.message_id)
+    if owner is None:
+        # Если владелец не записан — считаем, что это владелец
+        owners[call.message.message_id] = call.from_user.id
+        return True
+    if owner != call.from_user.id:
+        bot.answer_callback_query(call.id, "❌ Это не твоё меню")
+        return False
+    return True
+
 # ============ АВТОУДАЛЕНИЕ ============
 def delete_main_menu_later(chat_id, user_id, delay=300):
     def worker():
@@ -125,6 +139,7 @@ def delete_main_menu_later(chat_id, user_id, delay=300):
             if mid:
                 bot.delete_message(chat_id, mid)
                 del menu_msgs[user_id]
+                owners.pop(mid, None)
         except:
             pass
     threading.Thread(target=worker, daemon=True).start()
@@ -155,6 +170,7 @@ def main_menu_text():
 def start_cmd(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
+    # Удаляем старую корзину
     old_cart_msg = cart_msgs.get(user_id)
     if old_cart_msg:
         try:
@@ -167,14 +183,23 @@ def start_cmd(message):
     add_counters[user_id] = {}
     name = message.from_user.username
     cart_owners[user_id] = ("@" + name) if name else (message.from_user.first_name or "Гость")
+    # Удаляем старое меню
     old_menu = menu_msgs.get(user_id)
     if old_menu:
         try:
             bot.delete_message(chat_id, old_menu)
         except:
             pass
-    msg = bot.send_message(chat_id, main_menu_text(), reply_markup=main_menu())
+        owners.pop(old_menu, None)
+    # Отправляем меню (в ответ на сообщение игрока)
+    msg = bot.send_message(
+        chat_id,
+        main_menu_text(),
+        reply_markup=main_menu(),
+        reply_to_message_id=message.message_id
+    )
     menu_msgs[user_id] = msg.message_id
+    owners[msg.message_id] = user_id
     delete_main_menu_later(chat_id, user_id)
 
 # ============ ХЕЛПЕР ============
@@ -220,19 +245,25 @@ def vip_periods_menu(t):
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_vip")
 def menu_vip(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("👑 VIP\n\nВыбери тип:", call.message.chat.id, call.message.message_id, reply_markup=vip_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "👑 VIP\n\nВыбери тип:", reply_markup=vip_menu())
+        pass
 
 @bot.callback_query_handler(func=lambda call: call.data in ("vip_type_1", "vip_type_2"))
 def vip_type_cb(call):
+    if not check_owner(call):
+        return
     t = call.data.split("_")[2]
     try:
         bot.edit_message_text(f"👑 VIP {t}\n\nВыбери срок:", call.message.chat.id, call.message.message_id,
                               reply_markup=vip_periods_menu(t))
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, f"👑 VIP {t}\n\nВыбери срок:", reply_markup=vip_periods_menu(t))
+        pass
 
 @bot.message_handler(commands=['vip'])
 def vip_cmd(message):
@@ -240,6 +271,8 @@ def vip_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vip1_") or call.data.startswith("vip2_"))
 def vip_item_cb(call):
+    if not check_owner(call):
+        return
     key = call.data
     item = ITEMS[key]
     user_id = call.from_user.id
@@ -248,8 +281,9 @@ def vip_item_cb(call):
     try:
         bot.edit_message_text(block(item, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_vip", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block(item, added), reply_markup=item_kb("menu_vip", key))
+        pass
 
 # ============ STARS ============
 def stars_menu():
@@ -261,10 +295,13 @@ def stars_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_stars")
 def menu_stars(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("⭐ Звёзды\n\nВыбери количество:", call.message.chat.id, call.message.message_id, reply_markup=stars_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "⭐ Звёзды\n\nВыбери количество:", reply_markup=stars_menu())
+        pass
 
 @bot.message_handler(commands=['stars'])
 def stars_cmd(message):
@@ -272,6 +309,8 @@ def stars_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("stars_"))
 def stars_callback(call):
+    if not check_owner(call):
+        return
     amount = int(call.data.split("_")[1])
     key = f"stars_{amount}"
     user_id = call.from_user.id
@@ -280,8 +319,9 @@ def stars_callback(call):
     try:
         bot.edit_message_text(block_stars(amount, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_stars", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block_stars(amount, added), reply_markup=item_kb("menu_stars", key))
+        pass
 
 # ============ DIAMONDS ============
 def diamonds_menu():
@@ -293,10 +333,13 @@ def diamonds_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_diamonds")
 def menu_diamonds(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("💎 Алмазы\n\nВыбери количество:", call.message.chat.id, call.message.message_id, reply_markup=diamonds_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "💎 Алмазы\n\nВыбери количество:", reply_markup=diamonds_menu())
+        pass
 
 @bot.message_handler(commands=['diamonds'])
 def diamonds_cmd(message):
@@ -304,6 +347,8 @@ def diamonds_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("dia_"))
 def diamonds_callback(call):
+    if not check_owner(call):
+        return
     amount = call.data.split("_")[1]
     key = f"dia_{amount}"
     item = ITEMS[key]
@@ -313,8 +358,9 @@ def diamonds_callback(call):
     try:
         bot.edit_message_text(block(item, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_diamonds", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block(item, added), reply_markup=item_kb("menu_diamonds", key))
+        pass
 
 # ============ RUNES ============
 def runes_menu():
@@ -328,10 +374,13 @@ def runes_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_runes")
 def menu_runes(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("⚜️ Руны\n\nВыбери руну:", call.message.chat.id, call.message.message_id, reply_markup=runes_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "⚜️ Руны\n\nВыбери руну:", reply_markup=runes_menu())
+        pass
 
 @bot.message_handler(commands=['rune'])
 def rune_cmd(message):
@@ -339,6 +388,8 @@ def rune_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rune_"))
 def rune_callback(call):
+    if not check_owner(call):
+        return
     key = call.data
     item = ITEMS[key]
     user_id = call.from_user.id
@@ -347,8 +398,9 @@ def rune_callback(call):
     try:
         bot.edit_message_text(block(item, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_runes", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block(item, added), reply_markup=item_kb("menu_runes", key))
+        pass
 
 # ============ PREMIUM ============
 def premium_menu():
@@ -363,10 +415,13 @@ def premium_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_premium")
 def menu_premium(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("💠 Telegram Premium\n\nВыбери срок:", call.message.chat.id, call.message.message_id, reply_markup=premium_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "💠 Telegram Premium\n\nВыбери срок:", reply_markup=premium_menu())
+        pass
 
 @bot.message_handler(commands=['premium'])
 def premium_cmd(message):
@@ -374,6 +429,8 @@ def premium_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("prem_"))
 def premium_callback(call):
+    if not check_owner(call):
+        return
     months = call.data.split("_")[1]
     key = f"prem_{months}"
     item = ITEMS[key]
@@ -383,8 +440,9 @@ def premium_callback(call):
     try:
         bot.edit_message_text(block(item, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_premium", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block(item, added), reply_markup=item_kb("menu_premium", key))
+        pass
 
 # ============ CONSUMABLES ============
 def consumables_menu():
@@ -399,13 +457,18 @@ def consumables_menu():
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_consumables")
 def menu_consumables(call):
+    if not check_owner(call):
+        return
     try:
         bot.edit_message_text("📦 Расходники\n\nВыбери предмет:", call.message.chat.id, call.message.message_id, reply_markup=consumables_menu())
+        owners[call.message.message_id] = call.from_user.id
     except:
-        bot.send_message(call.message.chat.id, "📦 Расходники\n\nВыбери предмет:", reply_markup=consumables_menu())
+        pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cons_"))
 def consumables_callback(call):
+    if not check_owner(call):
+        return
     key = call.data
     item = ITEMS[key]
     user_id = call.from_user.id
@@ -414,8 +477,9 @@ def consumables_callback(call):
     try:
         bot.edit_message_text(block(item, added), call.message.chat.id, mid,
                               reply_markup=item_kb("menu_consumables", key))
+        owners[mid] = user_id
     except:
-        bot.send_message(call.message.chat.id, block(item, added), reply_markup=item_kb("menu_consumables", key))
+        pass
 
 @bot.message_handler(commands=['stone'])
 def stone_cmd(message):
@@ -499,15 +563,19 @@ def render_cart(user_id, chat_id, message_id=None):
     if message_id:
         try:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
+            owners[message_id] = user_id
             return
         except:
             pass
     msg = bot.send_message(chat_id, text, reply_markup=kb)
     cart_msgs[user_id] = msg.message_id
+    owners[msg.message_id] = user_id
 
 # ============ ХОЧУ ============
 @bot.callback_query_handler(func=lambda call: call.data.startswith("w|"))
 def want_callback(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     key = call.data.split("|", 1)[1]
     if key not in ITEMS:
@@ -537,6 +605,7 @@ def want_callback(call):
     try:
         bot.edit_message_text(text, call.message.chat.id, mid,
                               reply_markup=item_kb_from_key(key))
+        owners[mid] = user_id
     except:
         pass
 
@@ -553,6 +622,8 @@ def want_callback(call):
 # ============ УДАЛЕНИЕ ============
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rm|"))
 def remove_item(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     idx = int(call.data.split("|")[1])
     items = carts.get(user_id, [])
@@ -579,6 +650,8 @@ def remove_item(call):
 # ============ ОЧИСТИТЬ ВСЁ ============
 @bot.callback_query_handler(func=lambda call: call.data == "cart_clear")
 def cart_clear(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     carts[user_id] = []
     mid = cart_msgs.get(user_id)
@@ -593,12 +666,16 @@ def cart_clear(call):
 # ============ НАВИГАЦИЯ ============
 @bot.callback_query_handler(func=lambda call: call.data == "cart_prev")
 def cart_prev(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     cart_pages[user_id] = max(0, cart_pages.get(user_id, 0) - 1)
     render_cart(user_id, call.message.chat.id, call.message.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "cart_next")
 def cart_next(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     items = carts.get(user_id, [])
     total_pages = max(1, (len(items) + 3) // 4)
@@ -611,6 +688,8 @@ def cart_noop(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "cart_back")
 def cart_back(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     mid = cart_msgs.get(user_id)
     if mid:
@@ -621,18 +700,20 @@ def cart_back(call):
     cart_msgs[user_id] = None
     msg = bot.send_message(call.message.chat.id, main_menu_text(), reply_markup=main_menu())
     menu_msgs[user_id] = msg.message_id
+    owners[msg.message_id] = user_id
     delete_main_menu_later(call.message.chat.id, user_id)
 
 # ============ НАЗАД В ГЛАВНОЕ ============
 @bot.callback_query_handler(func=lambda call: call.data == "back_main")
 def back_main(call):
+    if not check_owner(call):
+        return
     user_id = call.from_user.id
     try:
         bot.edit_message_text(main_menu_text(), call.message.chat.id, call.message.message_id, reply_markup=main_menu())
+        owners[call.message.message_id] = user_id
     except:
-        msg = bot.send_message(call.message.chat.id, main_menu_text(), reply_markup=main_menu())
-        menu_msgs[user_id] = msg.message_id
-        delete_main_menu_later(call.message.chat.id, user_id)
+        pass
 
 # ============ НЕИЗВЕСТНАЯ КОМАНДА ============
 @bot.message_handler(func=lambda message: True)
