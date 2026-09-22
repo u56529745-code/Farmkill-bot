@@ -6,7 +6,7 @@ import os
 from flask import Flask
 
 # ============ НАСТРОЙКИ ============
-TOKEN = "8814067918:AAHVt-7m6mCafGS8sCAuOE8N2SqNma_cvZM"
+TOKEN = "8814067918:AAE_D2BAXH6UcIUhsXytIPOmoEkEH4srnq8"
 bot = telebot.TeleBot(TOKEN)
 
 # ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
